@@ -27,12 +27,13 @@ func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest
 	}
 
 	u := blobURL(c.scheme(), repo, dgst)
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
-	if err != nil {
-		return false, fmt.Errorf("building existence request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("building existence request: %w", err)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return false, fmt.Errorf("checking blob existence: %w", err)
 	}

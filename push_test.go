@@ -138,7 +138,7 @@ func TestClientPush(t *testing.T) {
 
 		err := tc.client.Push(t.Context(), repo, dgst, int64(len(content)), strings.NewReader(content))
 
-		require.ErrorContains(t, err, "committing blob")
+		require.ErrorContains(t, err, "committing upload")
 		require.ErrorContains(t, err, "registry returned 400")
 	})
 

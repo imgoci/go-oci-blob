@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -64,7 +65,11 @@ func interpretError(resp *http.Response) error {
 			message = parseErrorBody(body)
 		}
 	}
-	return &registryError{status: resp.StatusCode, message: message}
+	return &registryError{
+		status:     resp.StatusCode,
+		message:    message,
+		retryAfter: retryAfterDelay(resp.Header.Get("Retry-After"), time.Now()),
+	}
 }
 
 // parseErrorBody extracts a printable message from an OCI error body
@@ -105,6 +110,9 @@ type registryError struct {
 	// message is the detail parsed from the OCI error body, or empty
 	// when the body was absent or not the OCI error shape.
 	message string
+	// retryAfter is the wait the registry asked for via Retry-After,
+	// or zero when it asked for none.
+	retryAfter time.Duration
 }
 
 // Error renders the status and any parsed registry detail.

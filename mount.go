@@ -36,17 +36,24 @@ func (c *Client) Mount(
 	query := url.Values{}
 	query.Set("mount", dgst.String())
 	query.Set("from", src.Name)
-	resp, err := c.post(ctx, &url.URL{
+	target := &url.URL{
 		Scheme:   c.scheme(),
 		Host:     dst.Host,
 		Path:     "/v2/" + dst.Name + "/blobs/uploads/",
 		RawQuery: query.Encode(),
+	}
+	resp, err := c.doRetry(ctx, func() (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, target.String(), nil)
 	})
 	if err != nil {
 		return false, fmt.Errorf("mounting blob %s from %s into %s on %s: %w",
 			dgst, src.Name, dst.Name, dst.Host, err)
 	}
 	defer resp.Body.Close()
+	if !isSuccess(resp.StatusCode) {
+		return false, fmt.Errorf("mounting blob %s from %s into %s on %s: %w",
+			dgst, src.Name, dst.Name, dst.Host, interpretError(resp))
+	}
 
 	// Only 201 means the blob was mounted. The spec's decline path is
 	// a 202 with an upload session; treat every other success the
