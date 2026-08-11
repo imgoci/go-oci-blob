@@ -159,3 +159,14 @@ real use). Tests: tracker units incl. concurrent aggregation; scripted
 monotonic suites for all five paths; e2e regression green both registries.
 PR: https://github.com/imgoci/go-oci-blob/pull/17 (CI in flight).
 Remaining: Phase 8 (docs + v0.1.0 release).
+
+## 2026-08-11 07:28 — Close
+Session closed. All seven phase PRs reviewed and squash-merged: #10, #12,
+#13, #14, #15, #16, #17; master at d6c256d; implementation worktrees removed
+and stale remote refs pruned. SUMMARY.md written; INDEX row set complete;
+TECH_NOTES.md gained the e2e tag convention, the moon/proto PATH collision,
+the golangci cache-clean habit, and the mock-goroutine/.Maybe() pattern.
+Hand-off: Phase 8 (Diátaxis docs, godoc examples, design sync, release) is
+next; before merging release-please PR #11 fix its version (proposes 1.0.0,
+plan says 0.1.0) and confirm the imgoci-release-please app is installed.
+Dependabot #18/#19 open, untouched.
