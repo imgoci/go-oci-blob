@@ -29,3 +29,6 @@ The new package passed a one-iteration smoke of every sub-benchmark, 20 focused 
 
 ## 2026-08-11 15:26 — PR merged
 PR #21 was squash-merged through GitHub as `0251e8c` (`perf: remove transfer hot-path bottlenecks (#21)`) with an exact `c0d40a4` head guard. GitHub had already merged PR #22 onto `master`; it reported #21 clean against that parent and the squash applied without conflicts. The remote feature branch was deleted automatically. Post-merge CI, GitHub Pages, Release Please, and both CodeQL workflows passed on the exact merge commit.
+
+## 2026-08-11 15:41 — Close
+Closed the session after PR #21 merged as `0251e8c`. Local `master` is fast-forwarded to the merge commit, the `feat/transfer-performance` Worktrunk checkout and branch are removed, and all post-merge workflows are green. `SUMMARY.md`, `INDEX.md`, and the durable transfer-performance notes in `TECH_NOTES.md` now carry the final handoff state.
