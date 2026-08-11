@@ -57,6 +57,11 @@ func TestResolveLocation(t *testing.T) {
 			location: "http://registry.example.com/%zz",
 			wantErr:  "unparseable Location",
 		},
+		{
+			name:     "rejects an unsupported absolute scheme",
+			location: "gopher://storage.example.com/upload/abc",
+			wantErr:  "unsupported scheme",
+		},
 	}
 
 	for _, tt := range tests {
@@ -71,15 +76,6 @@ func TestResolveLocation(t *testing.T) {
 			assert.Equal(t, tt.want, got.String())
 		})
 	}
-}
-
-func TestIsSuccess(t *testing.T) {
-	assert.True(t, isSuccess(http.StatusOK), "200 is a success")
-	assert.True(t, isSuccess(http.StatusCreated), "201 is a success")
-	assert.True(t, isSuccess(http.StatusAccepted), "202 is a success")
-	assert.False(t, isSuccess(http.StatusMovedPermanently), "3xx is not a success")
-	assert.False(t, isSuccess(http.StatusNotFound), "4xx is not a success")
-	assert.False(t, isSuccess(http.StatusInternalServerError), "5xx is not a success")
 }
 
 func TestParseErrorBody(t *testing.T) {

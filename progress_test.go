@@ -90,7 +90,7 @@ func TestPullProgress(t *testing.T) {
 			Return(first, nil).Once()
 		tc.transport.EXPECT().
 			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
-			Return(response(http.StatusPartialContent, content[10:]), nil).Once()
+			Return(rangedResponse(content, 10, int64(len(content))-1), nil).Once()
 		log := &progressLog{}
 
 		rc, err := tc.client.Pull(t.Context(), repo, dgst, log.option())
@@ -134,7 +134,7 @@ func TestPullRangeProgress(t *testing.T) {
 	tc := newTestContext(t)
 	tc.transport.EXPECT().
 		RoundTrip(getRequestFor(endpoint, "bytes=5-14")).
-		Return(response(http.StatusPartialContent, content[5:15]), nil).Once()
+		Return(rangedResponse(content, 5, 14), nil).Once()
 	log := &progressLog{}
 
 	rc, err := tc.client.PullRange(t.Context(), repo, dgst, 5, 10, log.option())
@@ -163,6 +163,7 @@ func TestPushProgress(t *testing.T) {
 			}).Times(2)
 		var firstPut, secondPut capturedPut
 		expectPut(tc, &firstPut, http.StatusServiceUnavailable)
+		expectDelete(tc, uploadEndpoint+"session")
 		expectPut(tc, &secondPut, http.StatusCreated)
 		log := &progressLog{}
 

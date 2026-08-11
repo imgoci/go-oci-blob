@@ -32,6 +32,7 @@ func newTestContext(t *testing.T, opts ...blob.Option) *testContext {
 	transport := mocks.NewRoundTripper(t)
 	opts = append([]blob.Option{
 		blob.WithTransport(transport),
+		blob.WithStorageTransport(transport),
 		blob.WithRetryPolicy(blob.RetryPolicy{}),
 	}, opts...)
 	return &testContext{
@@ -78,13 +79,13 @@ func TestClientExists(t *testing.T) {
 			wantExists: true,
 		},
 		{
-			name: "reports true on any 2xx family member",
+			name: "rejects an off-spec 2xx family member",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(headRequestFor(blobEndpoint)).
 					Return(response(http.StatusAccepted, ""), nil)
 			},
-			wantExists: true,
+			wantErr: "registry returned 202",
 		},
 		{
 			name: "reports false without error on 404",

@@ -13,8 +13,10 @@ Design constraints, in short:
 
 - Runtime dependencies are the Go standard library plus
   `github.com/opencontainers/go-digest`.
-- Authentication is the caller's job: inject an authenticated
+- Authentication is the caller's job: inject an authenticated registry
   `http.RoundTripper`, for example from `oras-go` or `go-containerregistry`.
+  Off-origin storage and CDN requests use a separate transport with registry
+  credentials removed, so they do not follow an absolute upload location.
 - Defaults use the code paths every registry serves correctly. Chunked upload
   and parallel pull exist behind explicit toggles.
 

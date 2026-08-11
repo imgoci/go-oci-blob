@@ -21,6 +21,10 @@ func TestRepositoryValidate(t *testing.T) {
 			repo: Repository{Host: "localhost:5000", Name: "library/ubuntu"},
 		},
 		{
+			name: "accepts a bracketed IPv6 host with port",
+			repo: Repository{Host: "[2001:db8::1]:5000", Name: "library/ubuntu"},
+		},
+		{
 			name: "accepts every separator the grammar allows",
 			repo: Repository{Host: "r.io", Name: "a.b/c_d/e__f/g-h/i--j/k0"},
 		},
@@ -43,6 +47,31 @@ func TestRepositoryValidate(t *testing.T) {
 			name:    "rejects a host containing whitespace",
 			repo:    Repository{Host: "registry example.com", Name: "ubuntu"},
 			wantErr: "whitespace",
+		},
+		{
+			name:    "rejects a nonnumeric port",
+			repo:    Repository{Host: "registry.example.com:https", Name: "ubuntu"},
+			wantErr: "host and port are malformed",
+		},
+		{
+			name:    "rejects a port above 65535",
+			repo:    Repository{Host: "registry.example.com:65536", Name: "ubuntu"},
+			wantErr: "1 to 65535",
+		},
+		{
+			name:    "rejects an empty port",
+			repo:    Repository{Host: "registry.example.com:", Name: "ubuntu"},
+			wantErr: "port is empty",
+		},
+		{
+			name:    "rejects user information",
+			repo:    Repository{Host: "user@registry.example.com", Name: "ubuntu"},
+			wantErr: "user information",
+		},
+		{
+			name:    "rejects a host query",
+			repo:    Repository{Host: "registry.example.com?debug=1", Name: "ubuntu"},
+			wantErr: "query",
 		},
 		{
 			name:    "rejects an empty name",

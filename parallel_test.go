@@ -79,12 +79,11 @@ func TestClientPullParallel(t *testing.T) {
 		tc := newParallelContext(t, 4, 10)
 		empty := digest.FromString("")
 		emptyEndpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + empty.String()
+		unsatisfiable := response(http.StatusRequestedRangeNotSatisfiable, "")
+		unsatisfiable.Header.Set("Content-Range", "bytes */0")
 		tc.transport.EXPECT().
 			RoundTrip(getRequestFor(emptyEndpoint, "bytes=0-9")).
-			Return(response(http.StatusRequestedRangeNotSatisfiable, ""), nil).Once()
-		tc.transport.EXPECT().
-			RoundTrip(getRequestFor(emptyEndpoint, "")).
-			Return(response(http.StatusOK, ""), nil).Once()
+			Return(unsatisfiable, nil).Once()
 
 		rc, err := tc.client.Pull(t.Context(), repo, empty)
 

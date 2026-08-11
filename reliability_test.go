@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -36,6 +38,53 @@ func brokenBody(prefix string) io.ReadCloser {
 		strings.NewReader(prefix),
 		iotest.ErrReader(errors.New("connection reset by peer")),
 	))
+}
+
+// blockingBody keeps Read blocked until Close interrupts it.
+type blockingBody struct {
+	started   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+// newBlockingBody constructs a body whose channels expose its read
+// lifecycle to a test.
+func newBlockingBody() *blockingBody {
+	return &blockingBody{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+}
+
+// Read blocks until Close is called.
+func (b *blockingBody) Read(_ []byte) (int, error) {
+	b.startOnce.Do(func() { close(b.started) })
+	<-b.closed
+	return 0, errors.New("response body closed")
+}
+
+// Close interrupts Read and is idempotent.
+func (b *blockingBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+// contextErrorBody waits for its context to finish, then simulates a
+// stale transport error that must not hide the context error.
+type contextErrorBody struct {
+	ctx context.Context
+}
+
+// Read waits for context completion and returns an unrelated error.
+func (b *contextErrorBody) Read(_ []byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, errors.New("stale connection reset")
+}
+
+// Close is a no-op for the synthetic body.
+func (b *contextErrorBody) Close() error {
+	return nil
 }
 
 func TestExistsRetries(t *testing.T) {
@@ -133,7 +182,7 @@ func TestPullResume(t *testing.T) {
 			Return(first, nil).Once()
 		tc.transport.EXPECT().
 			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
-			Return(response(http.StatusPartialContent, content[10:]), nil).Once()
+			Return(rangedResponse(content, 10, int64(len(content))-1), nil).Once()
 
 		rc, err := tc.client.Pull(t.Context(), repo, dgst)
 
@@ -165,6 +214,80 @@ func TestPullResume(t *testing.T) {
 		assert.Equal(t, content, string(got))
 	})
 
+	t.Run("continues after a shorter valid resume interval", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		first := response(http.StatusOK, "")
+		first.Body = brokenBody(content[:10])
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			Return(first, nil).Once()
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
+			Return(partialRangeResponse(content[10:15], "bytes 10-14/20"), nil).Once()
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=15-")).
+			Return(partialRangeResponse(content[15:], "bytes 15-19/20"), nil).Once()
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+
+		require.NoError(t, err)
+		got, err := io.ReadAll(rc)
+		require.NoError(t, err, "the next resume must start after the short interval")
+		require.NoError(t, rc.Close())
+		assert.Equal(t, content, string(got))
+	})
+
+	t.Run("shares one request budget across resume retries", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		first := response(http.StatusOK, "")
+		first.Body = brokenBody(content[:10])
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			Return(first, nil).Once()
+		var resumeRequests atomic.Int32
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
+			RunAndReturn(func(*http.Request) (*http.Response, error) {
+				resumeRequests.Add(1)
+				return response(http.StatusServiceUnavailable, ""), nil
+			}).Times(2)
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+
+		require.NoError(t, err)
+		got, err := io.ReadAll(rc)
+		require.ErrorContains(t, err, "registry returned 503")
+		require.ErrorContains(t, err, "after 3 request attempts")
+		require.NoError(t, rc.Close())
+		assert.Equal(t, content[:10], string(got))
+		assert.Equal(t, int32(2), resumeRequests.Load(),
+			"the initial GET and resume attempts must share MaxAttempts")
+	})
+
+	t.Run("counts initial GET retries against the resume budget", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		var requests atomic.Int32
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			RunAndReturn(func(*http.Request) (*http.Response, error) {
+				if requests.Add(1) < 3 {
+					return response(http.StatusServiceUnavailable, ""), nil
+				}
+				final := response(http.StatusOK, "")
+				final.Body = brokenBody("")
+				return final, nil
+			}).Times(3)
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+
+		require.NoError(t, err)
+		_, err = io.ReadAll(rc)
+		require.ErrorContains(t, err, "after 3 request attempts")
+		require.NoError(t, rc.Close())
+		assert.Equal(t, int32(3), requests.Load(),
+			"a broken body must not restart the initial GET budget")
+	})
+
 	t.Run("gives up when the stream keeps breaking without progress", func(t *testing.T) {
 		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
 		first := response(http.StatusOK, "")
@@ -175,7 +298,7 @@ func TestPullResume(t *testing.T) {
 		tc.transport.EXPECT().
 			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
 			RunAndReturn(func(*http.Request) (*http.Response, error) {
-				resp := response(http.StatusPartialContent, "")
+				resp := rangedResponse(content, 10, int64(len(content))-1)
 				resp.Body = brokenBody("")
 				return resp, nil
 			}).Times(2)
@@ -187,6 +310,159 @@ func TestPullResume(t *testing.T) {
 		require.ErrorContains(t, err, "kept breaking at byte 10")
 		require.NoError(t, rc.Close())
 	})
+
+	t.Run("rejects a resumed response starting at the wrong byte", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		first := response(http.StatusOK, "")
+		first.Body = brokenBody(content[:10])
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			Return(first, nil).Once()
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=10-")).
+			Return(partialRangeResponse(content[:10], "bytes 0-9/20"), nil).Once()
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+
+		require.NoError(t, err)
+		got, err := io.ReadAll(rc)
+		require.ErrorContains(t, err, "Content-Range \"bytes 0-9/20\"")
+		require.NoError(t, rc.Close())
+		assert.Equal(t, content[:10], string(got), "wrong-offset resume bytes must not be delivered")
+	})
+}
+
+func TestPullCloseTerminatesTheStream(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+	content := "0123456789abcdefghij"
+	dgst := digest.FromString(content)
+	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
+
+	t.Run("interrupts a blocked read without reopening the download", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		body := newBlockingBody()
+		initial := response(http.StatusOK, "")
+		initial.Body = body
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			Return(initial, nil).Once()
+		var resumeRequests atomic.Int32
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=0-")).
+			RunAndReturn(func(*http.Request) (*http.Response, error) {
+				resumeRequests.Add(1)
+				return rangedResponse(content, 0, int64(len(content))-1), nil
+			}).Maybe()
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+		require.NoError(t, err)
+		readDone := make(chan error, 1)
+		go func() {
+			_, readErr := rc.Read(make([]byte, 1))
+			readDone <- readErr
+		}()
+		<-body.started
+
+		require.NoError(t, rc.Close())
+		select {
+		case readErr := <-readDone:
+			require.ErrorIs(t, readErr, io.ErrClosedPipe)
+		case <-time.After(time.Second):
+			t.Fatal("Read remained blocked after Close")
+		}
+		assert.Zero(t, resumeRequests.Load(), "Close must not trigger a new ranged request")
+	})
+
+	t.Run("cancels a blocked resume request", func(t *testing.T) {
+		tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+		initial := response(http.StatusOK, "")
+		initial.Body = brokenBody("")
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "")).
+			Return(initial, nil).Once()
+		requestStarted := make(chan struct{})
+		tc.transport.EXPECT().
+			RoundTrip(getRequestFor(endpoint, "bytes=0-")).
+			RunAndReturn(func(req *http.Request) (*http.Response, error) {
+				close(requestStarted)
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			}).Once()
+
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+		require.NoError(t, err)
+		readDone := make(chan error, 1)
+		go func() {
+			_, readErr := rc.Read(make([]byte, 1))
+			readDone <- readErr
+		}()
+		select {
+		case <-requestStarted:
+		case <-time.After(time.Second):
+			t.Fatal("resume request did not start")
+		}
+
+		require.NoError(t, rc.Close())
+		select {
+		case readErr := <-readDone:
+			require.ErrorIs(t, readErr, io.ErrClosedPipe)
+		case <-time.After(time.Second):
+			t.Fatal("resume request remained blocked after Close")
+		}
+	})
+}
+
+func TestPullPreservesContextErrors(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+	content := "context-bound content"
+	dgst := digest.FromString(content)
+	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
+
+	tests := []struct {
+		name      string
+		newCtx    func(t *testing.T) (context.Context, context.CancelFunc)
+		wantError error
+	}{
+		{
+			name: "preserves cancellation",
+			newCtx: func(t *testing.T) (context.Context, context.CancelFunc) {
+				t.Helper()
+				return context.WithCancel(t.Context())
+			},
+			wantError: context.Canceled,
+		},
+		{
+			name: "preserves deadline expiry",
+			newCtx: func(t *testing.T) (context.Context, context.CancelFunc) {
+				t.Helper()
+				return context.WithTimeout(t.Context(), 10*time.Millisecond)
+			},
+			wantError: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.newCtx(t)
+			defer cancel()
+			tc := newTestContext(t, blob.WithRetryPolicy(fastRetry()))
+			initial := response(http.StatusOK, "")
+			initial.Body = &contextErrorBody{ctx: ctx}
+			tc.transport.EXPECT().
+				RoundTrip(getRequestFor(endpoint, "")).
+				Return(initial, nil).Once()
+
+			rc, err := tc.client.Pull(ctx, repo, dgst)
+			require.NoError(t, err)
+			if errors.Is(tt.wantError, context.Canceled) {
+				cancel()
+			}
+			_, err = rc.Read(make([]byte, 1))
+
+			require.ErrorIs(t, err, tt.wantError)
+			require.NoError(t, rc.Close())
+		})
+	}
 }
 
 func TestPushRestart(t *testing.T) {
@@ -208,6 +484,7 @@ func TestPushRestart(t *testing.T) {
 		expectSession(tc, 2)
 		var firstPut, secondPut capturedPut
 		expectPut(tc, &firstPut, http.StatusServiceUnavailable)
+		expectDelete(tc, uploadEndpoint+"session")
 		expectPut(tc, &secondPut, http.StatusCreated)
 
 		err := tc.client.Push(t.Context(), repo, dgst,
@@ -224,6 +501,7 @@ func TestPushRestart(t *testing.T) {
 		expectSession(tc, 2)
 		var firstPut, secondPut capturedPut
 		expectPut(tc, &firstPut, http.StatusServiceUnavailable)
+		expectDelete(tc, uploadEndpoint+"session")
 		expectPut(tc, &secondPut, http.StatusCreated)
 
 		full := "SKIP!" + content
@@ -243,6 +521,7 @@ func TestPushRestart(t *testing.T) {
 		expectSession(tc, 1)
 		var put capturedPut
 		expectPut(tc, &put, http.StatusServiceUnavailable)
+		expectDelete(tc, uploadEndpoint+"session")
 
 		err := tc.client.Push(t.Context(), repo, dgst, int64(len(content)),
 			iotest.OneByteReader(strings.NewReader(content)))
@@ -255,6 +534,7 @@ func TestPushRestart(t *testing.T) {
 		expectSession(tc, 1)
 		var put capturedPut
 		expectPut(tc, &put, http.StatusBadRequest)
+		expectDelete(tc, uploadEndpoint+"session")
 
 		err := tc.client.Push(t.Context(), repo, dgst,
 			int64(len(content)), strings.NewReader(content))
