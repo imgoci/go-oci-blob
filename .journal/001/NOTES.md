@@ -35,3 +35,14 @@ Next: user review of PR #7.
 User rulings: no size -1 (Push size mandatory, callers spool if unknown); PullRange is in (trivial, real value); progress callbacks are in (guaranteed first feature request, consumers need visibility).
 Doc updated (commit 0b51490): PullRange added to API sketch as unverified ranged read (digest covers whole blob, partial body can't be checked; Pull remains the verified path); progress as per-call TransferOption WithProgress(fn(done, total)) with committed-progress semantics — rationale recorded that caller-side reader wrapping double-counts on upload restart; parallel pull reports one aggregated count. Open questions section removed; all questions resolved into the body.
 Design doc is now decision-complete. Next: user approval/merge of PR #7, then implementation planning.
+
+## 2026-08-10 20:06 — Design merged; repo reshaped to library-only
+Merged PR #7 (design doc) via squash. Then followed DELETE_ME.md's library-only checklist on branch chore/library-shape (PR #8, 43 files, -3015 lines):
+- Deleted: cmd/, internal/, goreleaser, ghd.toml, melange/apko yaml + skills + mise tools/task, release/release-dry-run/attest/security-scan workflows, ghd staging scripts, DELETE_ME.md.
+- Module renamed to github.com/imgoci/go-oci-blob; go.mod now zero deps; placeholder root package blob (doc.go) keeps build/lint/test green.
+- Kept Release Please per user: manifest reset 0.0.0, CHANGELOG cleared, workflow now uses IMGOCI_RELEASE_APP_ID / IMGOCI_RELEASE_APP_PRIVATE_KEY. Creds sourced from 1Password item imgoci-release-please (Development vault, fields app_id + key.pem file) and set on the repo via gh variable/secret set.
+- repository-settings.toml: is_template=false, required checks -> ci only, tag bypass app -> imgoci-release-please. NOTE: settings not yet applied to GitHub; run .github/scripts/configure_github_repo.py apply after merge.
+- User decisions this turn: dual license Apache-2.0 OR MIT (LICENSE-APACHE + LICENSE-MIT, Rust-style); keep Release Please.
+- moon run root:check passes; mise.lock + docs/uv.lock regenerated; rg shows zero template-go/meigma refs left.
+- .claude/skills is a symlink to .agents/skills in the main checkout, so deleted skills disappear on merge automatically.
+Pending: PR #8 CI, then merge; obsolete dependabot PRs (goreleaser-action, docker/login-action, attest) should auto-close after merge; apply repository settings; release app must be installed on imgoci/go-oci-blob for release-please to work.
