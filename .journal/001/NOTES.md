@@ -55,3 +55,6 @@ Squash-merged chore/library-shape (master b60c246); main checkout fast-forwarded
 
 ## 2026-08-10 20:28 — Dependabot PRs addressed
 #4 (setup-go) closed — touched only deleted release workflows (dependabot had already closed it). #5 (mise-action 4.2.4) and #6 (mkdocs-material 9.7.7) squash-merged after confirming dependabot had rebased them onto the renamed project (checked #6's uv.lock for stale template-go-docs name: clean). Rebased my #9 (pymdown-extensions 11.0.1 security bump) onto the new master by restoring master's uv.lock and re-running uv lock --upgrade-package; branch force-pushed, docs build green. #9 merge closes both open Dependabot alerts.
+
+## 2026-08-10 20:34 — All PRs merged; repo clean
+Squash-merged #9 (pymdown-extensions 11.0.1 + carries mkdocs-material 9.7.7). Zero open PRs. Dependabot alerts pending async graph rescan; master lock confirmed at 11.0.1. Repo state: design doc merged, library-only shape, settings/rulesets applied, public, Pages live, release creds set, security alerts remediated. Session goal (design doc before code) plus full repo bootstrap complete. Nothing in flight except confirming imgoci-release-please app installation before first release.
