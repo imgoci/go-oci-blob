@@ -17,6 +17,9 @@ type transferConfig struct {
 func applyTransferOptions(opts []TransferOption) transferConfig {
 	var cfg transferConfig
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(&cfg)
 	}
 	return cfg
@@ -25,13 +28,13 @@ func applyTransferOptions(opts []TransferOption) transferConfig {
 // WithProgress reports transfer progress to fn.
 //
 // fn receives the cumulative number of bytes moved so far and the
-// total (-1 when the total is unknown). The count is committed
-// progress and never moves backward: a retried request, a resumed
-// download, or a restarted upload does not double-count bytes, and
-// parallel pulls report one aggregated count. fn runs synchronously
-// on the transfer path — possibly from several goroutines during a
-// parallel pull, though never concurrently with itself — so it must
-// return quickly.
+// total (-1 when the total is unknown). Pull counts bytes delivered to
+// the caller. Monolithic Push reports only after the final 201 response;
+// chunked Push advances after each PATCH Range acknowledgement, so reaching
+// total does not prove the final commit succeeded. Only a nil Push error does.
+// Counts never move backward across retries or resumes, and callbacks never
+// run concurrently with themselves. fn runs synchronously on the transfer
+// path, so it must return quickly.
 func WithProgress(fn func(done, total int64)) TransferOption {
 	return func(cfg *transferConfig) {
 		cfg.progress = fn

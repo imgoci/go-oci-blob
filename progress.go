@@ -16,7 +16,7 @@ type progressTracker struct {
 	fn func(done, total int64)
 	// total is the blob or window size, or -1 when unknown.
 	total int64
-	// done is the committed cumulative count reported so far.
+	// done is the accepted or delivered cumulative count reported so far.
 	done int64
 }
 
@@ -39,7 +39,7 @@ func (t *progressTracker) setTotal(total int64) {
 	t.total = total
 }
 
-// add reports n freshly moved bytes on top of the committed count.
+// add reports n freshly moved bytes on top of the cumulative count.
 func (t *progressTracker) add(n int64) {
 	if t == nil || n <= 0 {
 		return
@@ -51,7 +51,7 @@ func (t *progressTracker) add(n int64) {
 }
 
 // set reports that the transfer has reached the absolute position
-// pos. Positions at or below the committed count are suppressed, so
+// pos. Positions at or below the prior count are suppressed, so
 // a restarted attempt stays silent until it passes its predecessor.
 func (t *progressTracker) set(pos int64) {
 	if t == nil {
@@ -93,25 +93,4 @@ func (p *progressReader) Read(b []byte) (int, error) {
 // Close closes the wrapped stream.
 func (p *progressReader) Close() error {
 	return p.body.Close()
-}
-
-// countingReader tracks the absolute position read from an upload
-// stream, reporting it as committed transfer progress via set, so a
-// restarted upload never double-counts.
-type countingReader struct {
-	// r is the caller's blob stream for the current attempt.
-	r io.Reader
-	// pos is the attempt-local absolute position.
-	pos int64
-	// tracker receives position reports; may be nil.
-	tracker *progressTracker
-}
-
-// Read forwards to the underlying reader and reports the new
-// position.
-func (c *countingReader) Read(b []byte) (int, error) {
-	n, err := c.r.Read(b)
-	c.pos += int64(n)
-	c.tracker.set(c.pos)
-	return n, err
 }

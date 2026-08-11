@@ -106,6 +106,15 @@ func TestClientPull(t *testing.T) {
 			wantErr: "registry returned 500",
 		},
 		{
+			name: "rejects a non-terminal success status",
+			setupMocks: func(tc *testContext) {
+				tc.transport.EXPECT().
+					RoundTrip(getRequestFor(blobEndpoint, "")).
+					Return(response(http.StatusAccepted, ""), nil)
+			},
+			wantErr: "registry returned 202",
+		},
+		{
 			name: "surfaces a transport failure",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
@@ -166,7 +175,7 @@ func TestClientPullRange(t *testing.T) {
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(getRequestFor(blobEndpoint, "bytes=5-9")).
-					Return(response(http.StatusPartialContent, content[5:10]), nil)
+					Return(rangedResponse(content, 5, 9), nil)
 			},
 			wantBody: content[5:10],
 		},
@@ -199,6 +208,16 @@ func TestClientPullRange(t *testing.T) {
 					Return(response(http.StatusOK, content), nil)
 			},
 			wantErr: "shorter than range offset",
+		},
+		{
+			name:   "rejects a non-terminal success status",
+			offset: 0, length: 5,
+			setupMocks: func(tc *testContext) {
+				tc.transport.EXPECT().
+					RoundTrip(getRequestFor(blobEndpoint, "bytes=0-4")).
+					Return(response(http.StatusAccepted, ""), nil)
+			},
+			wantErr: "registry returned 202",
 		},
 		{
 			name:   "rejects a negative offset without touching the wire",

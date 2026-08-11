@@ -1,7 +1,6 @@
 package blob_test
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,6 +19,7 @@ type capturedPatch struct {
 	body          string
 	contentRange  string
 	contentLength int64
+	getBody       bool
 }
 
 // expectPatch scripts one chunk PATCH on the mocked transport,
@@ -31,15 +31,16 @@ func expectPatch(tc *testContext, capture *capturedPatch, status int, ack, locat
 			return req.Method == http.MethodPatch
 		})).
 		RunAndReturn(func(req *http.Request) (*http.Response, error) {
-			body, err := io.ReadAll(req.Body)
-			if err != nil {
-				return nil, err
-			}
+			body, err := readAndCloseRequestBody(req)
 			*capture = capturedPatch{
 				url:           req.URL.String(),
 				body:          string(body),
 				contentRange:  req.Header.Get("Content-Range"),
 				contentLength: req.ContentLength,
+				getBody:       req.GetBody != nil,
+			}
+			if err != nil {
+				return nil, err
 			}
 			resp := response(status, "")
 			if ack != "" {
@@ -82,6 +83,7 @@ func TestClientPushChunked(t *testing.T) {
 		assert.Equal(t, "0-7", p1.contentRange)
 		assert.Equal(t, content[:8], p1.body)
 		assert.Equal(t, int64(8), p1.contentLength)
+		assert.True(t, p1.getBody, "seekable chunk bodies should support 307/308 replay")
 		assert.Equal(t, uploadEndpoint+"s2", p2.url, "relative Location should resolve")
 		assert.Equal(t, "8-15", p2.contentRange)
 		assert.Equal(t, content[8:16], p2.body)
@@ -126,6 +128,7 @@ func TestClientPushChunked(t *testing.T) {
 		// ECR-style: the second chunk is accepted with a success
 		// status but the acknowledged range stays where it was.
 		expectPatch(tc, &p2, http.StatusAccepted, "0-7", "")
+		expectDelete(tc, uploadEndpoint+"s1")
 
 		err := tc.client.Push(t.Context(), repo, dgst, int64(len(content)), strings.NewReader(content))
 
@@ -140,6 +143,7 @@ func TestClientPushChunked(t *testing.T) {
 			Return(sessionResponse(http.StatusAccepted, uploadEndpoint+"s1"), nil).Once()
 		var p1 capturedPatch
 		expectPatch(tc, &p1, http.StatusAccepted, "", "")
+		expectDelete(tc, uploadEndpoint+"s1")
 
 		err := tc.client.Push(t.Context(), repo, dgst, int64(len(content)), strings.NewReader(content))
 
@@ -156,6 +160,7 @@ func TestClientPushChunked(t *testing.T) {
 			}).Times(2)
 		var failed, p1, p2, p3 capturedPatch
 		expectPatch(tc, &failed, http.StatusServiceUnavailable, "", "")
+		expectDelete(tc, uploadEndpoint+"s1")
 		expectPatch(tc, &p1, http.StatusAccepted, "0-7", "")
 		expectPatch(tc, &p2, http.StatusAccepted, "0-15", "")
 		expectPatch(tc, &p3, http.StatusAccepted, "0-19", "")

@@ -67,8 +67,9 @@ type Repository struct {
 
 func New(opts ...Option) *Client
 
-// Client options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool),
-//                 WithChunkedUpload(chunkSize int64), WithParallelPull(workers int, chunkSize int64)
+// Client options: WithTransport(http.RoundTripper), WithStorageTransport(http.RoundTripper),
+//                 WithRetryPolicy(...), WithPlainHTTP(bool), WithChunkedUpload(chunkSize int64),
+//                 WithParallelPull(workers int, chunkSize int64)
 // Per-call options: WithProgress(fn func(done, total int64))
 
 func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error)
@@ -86,19 +87,23 @@ API decisions:
   `ErrDigestMismatch` instead of `io.EOF` when the hash does not match.
 - `Push` requires the digest and size up front. Registries need the digest to
   commit an upload, and the size sets `Content-Length`. Size is mandatory:
-  there is no unknown-length upload. A caller that does not know the size
-  spools the data first and comes back with a number.
+  there is no unknown-length upload, and the client rejects both short and
+  trailing input. The reader must reach EOF immediately after that size; a
+  streaming producer closes its pipe after the final byte. A caller that does
+  not know the size spools the data first and comes back with a number.
 - `PullRange` serves partial blobs through a ranged `GET`. It never verifies
   the digest: the digest covers the whole blob, so a partial body cannot be
-  checked against it. `Pull` is the verified path; callers that need
-  integrity on partial reads build it above the library.
+  checked against it. The client therefore validates every `Content-Range`
+  before exposing bytes and follows shorter valid portions until it has the
+  requested window. `Pull` is the verified path; callers that need integrity
+  on partial reads build it above the library.
 - Byte-moving calls take `WithProgress(fn)`. The callback receives cumulative
   bytes moved and the total (`-1` when unknown), runs synchronously on the
-  transfer path, and must return quickly. A caller-side wrapper cannot do
-  this job: on push the library consumes the reader internally, and a
-  wrapped reader double-counts bytes when a retry restarts the upload. The
-  library reports committed progress instead. Parallel pull reports one
-  aggregated count.
+  transfer path, and must return quickly. Pull reports bytes delivered to the
+  caller. Monolithic Push reports after the final `201`; chunked Push advances
+  after each PATCH acknowledgement, so only a nil Push error proves the final
+  commit succeeded. A caller-side wrapper cannot report these consistently
+  across transparent retries and parallel workers.
 - `Mount` returns `(false, nil)` when the registry declines the mount. The
   caller then decides whether to push. Mount-with-automatic-push-fallback can
   be layered on later if real use shows the need.
@@ -120,13 +125,25 @@ The blob subset of the distribution spec is five request shapes:
 
 Rules the client follows:
 
-- React to status-code families, not exact codes. A registry that returns
-  `200` where the spec says `201` still succeeded.
-- Resolve `Location` headers as relative or absolute URLs. Registries return
-  both.
-- Follow redirects to blob storage (S3, CDN). Go's `http.Client` strips
-  `Authorization` on cross-host redirects. That is correct here and the design
-  depends on it: registry credentials must not reach a CDN host.
+- Validate endpoint-specific success statuses. `200 OK` proves existence or a
+  full pull, `206 Partial Content` carries a validated range, `202 Accepted`
+  opens or advances an upload session, and `201 Created` completes a commit or
+  mount. An unexpected 2xx response is not promoted to a terminal success.
+- Resolve `Location` headers as relative or absolute URLs. Preserve the raw
+  query bytes because registries use opaque and sometimes signed session
+  parameters; append only the digest parameter required for commit.
+- Scope the caller's potentially authenticated registry transport to the
+  registry origin. Absolute upload locations and cross-origin redirects use a
+  separate storage transport with `Authorization`, `Proxy-Authorization`,
+  cookies, and `Referer` removed. This routing happens before either transport
+  runs, so an auth wrapper cannot add registry credentials to a storage
+  request or expose opaque session state through a redirect referrer.
+- Follow read redirects normally. A write redirect must preserve the method
+  and have a replayable body (`307` or `308`); reject redirects that would turn
+  a `POST`, `PUT`, or `PATCH` into a bodyless `GET` instead of accepting the
+  redirected `200` as upload success. Redirect targets must remain HTTP(S),
+  redirect loops stop at ten hops, and deterministic redirect-policy failures
+  are not retried as fresh upload sessions.
 - Parse the OCI error body (`{"errors": [...]}`) when present. When the body
   is not that shape, fall back to the status code. A malformed error body is
   never itself an error.
@@ -140,7 +157,8 @@ Rules the client follows:
   chunk just sent, abandon the session and fail the upload with a
   descriptive error. The digest-verified commit `PUT` is the backstop: a
   registry that dropped bytes fails the commit rather than storing a bad
-  blob.
+  blob. A non-SHA-256 upload names its digest algorithm when opening the
+  session.
 
 ## Reliability
 
@@ -150,8 +168,17 @@ Retry policy:
   retry other `4xx`; the request is wrong, not unlucky.
 - Exponential backoff with full jitter. Honor `Retry-After` when the registry
   sends it, capped by the policy's maximum delay.
-- The caller's `context` bounds everything. A canceled context stops retries
-  immediately.
+- `MaxAttempts` bounds the complete request, including parallel chunk body
+  retries; nested retry loops must not multiply it.
+- The caller's `context` stops network work, retries, and backoff immediately
+  and remains inspectable through `errors.Is` on the returned error. An
+  arbitrary `io.Reader` has no cancellation operation, so `Push` still waits
+  for an in-flight source `Read` to return before it gives the reader back to
+  the caller. A blocking producer must arrange to unblock its reader when the
+  context ends.
+- Once an upload session will not be continued, send a best-effort `DELETE`
+  to its current location. Cleanup failure never replaces the original
+  transfer error.
 
 Downloads resume; uploads restart:
 
@@ -196,6 +223,9 @@ scripted-conversation suite is the largest of the three.
 ## Performance
 
 - Stream everything. No code path holds a whole blob in memory (P2).
+- Upload request bodies use a fixed 32 KiB scratch buffer so transport `Close`
+  can unblock network reads without giving up safe ownership of the caller's
+  source reader.
 - Copy loops reuse buffers from a `sync.Pool`.
 - Connection reuse and HTTP/2 come from the injected transport; the client
   never defeats them by closing bodies early or rebuilding clients.
@@ -206,8 +236,16 @@ Parallel pull is the library's one extra feature. It is off by default;
 - `Pull` keeps the same signature and still returns a verifying
   `io.ReadCloser`. Workers fetch ranged `GET`s concurrently; the reader
   emits chunks in order, so digest verification works unchanged.
-- Memory is bounded by `workers × chunkSize`. This is the one deliberate
-  exception to "never buffer", and the caller sets the bound.
+- Payload buffering is bounded by roughly `workers × chunkSize`, and active
+  response bodies are bounded by `workers`; the initial range probe consumes
+  one of those worker slots. This is the one deliberate exception to "never
+  buffer", and the caller sets that bound.
+- Validate each ranged response's start, end, and total. A registry may return
+  a shorter valid portion, which the same worker completes without changing
+  output order.
+- Closing the reader cancels the probe, queued work, active bodies, and retry
+  backoff before returning. A progress callback may request that close without
+  waiting on its own worker result.
 - If the registry does not serve ranges, `Pull` falls back to a single
   stream. The toggle states intent, not a requirement.
 - A scatter-write variant (`io.WriterAt` sink) was rejected: it would add a

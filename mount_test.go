@@ -6,6 +6,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	blob "github.com/imgoci/go-oci-blob"
@@ -40,17 +41,19 @@ func TestClientMount(t *testing.T) {
 					RoundTrip(postRequestFor(mountEndpoint)).
 					Return(sessionResponse(http.StatusAccepted,
 						"/v2/mirror/ubuntu/blobs/uploads/session-1"), nil)
+				expectDelete(tc,
+					"https://registry.example.com/v2/mirror/ubuntu/blobs/uploads/session-1")
 			},
 			wantMounted: false,
 		},
 		{
-			name: "treats any other success status as a decline",
+			name: "rejects any other success status",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(postRequestFor(mountEndpoint)).
 					Return(response(http.StatusOK, ""), nil)
 			},
-			wantMounted: false,
+			wantErr: "registry returned 200",
 		},
 		{
 			name: "surfaces registry errors",
@@ -112,5 +115,97 @@ func TestClientMountRejectsBadInput(t *testing.T) {
 			blob.Repository{Host: "a.example.com", Name: "SRC"}, dgst)
 
 		require.ErrorContains(t, err, "invalid mount source")
+	})
+}
+
+func TestClientMountCanonicalRegistryHost(t *testing.T) {
+	dgst := digest.FromString("x")
+	tests := []struct {
+		name     string
+		opts     []blob.Option
+		dstHost  string
+		srcHost  string
+		endpoint string
+	}{
+		{
+			name:     "DNS case and the HTTPS default port identify one registry",
+			dstHost:  "REGISTRY.example.com",
+			srcHost:  "registry.example.com:443",
+			endpoint: "https://REGISTRY.example.com/v2/dst/blobs/uploads/",
+		},
+		{
+			name:     "the HTTP default port identifies one registry",
+			opts:     []blob.Option{blob.WithPlainHTTP(true)},
+			dstHost:  "registry.example.com",
+			srcHost:  "REGISTRY.example.com:80",
+			endpoint: "http://registry.example.com/v2/dst/blobs/uploads/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newTestContext(t, tt.opts...)
+			mountEndpoint := tt.endpoint + "?from=src&mount=sha256%3A" + dgst.Encoded()
+			tc.transport.EXPECT().
+				RoundTrip(postRequestFor(mountEndpoint)).
+				Return(sessionResponse(http.StatusCreated, "/v2/dst/blobs/"+dgst.String()), nil)
+
+			mounted, err := tc.client.Mount(t.Context(),
+				blob.Repository{Host: tt.dstHost, Name: "dst"},
+				blob.Repository{Host: tt.srcHost, Name: "src"}, dgst)
+
+			require.NoError(t, err)
+			assert.True(t, mounted)
+		})
+	}
+}
+
+func TestClientMountSessionCleanup(t *testing.T) {
+	dst := blob.Repository{Host: "registry.example.com", Name: "dst"}
+	src := blob.Repository{Host: "registry.example.com", Name: "src"}
+	dgst := digest.FromString("x")
+	mountEndpoint := "https://registry.example.com/v2/dst/blobs/uploads/" +
+		"?from=src&mount=sha256%3A" + dgst.Encoded()
+
+	t.Run("resolves a relative session Location from the redirected POST", func(t *testing.T) {
+		tc := newTestContext(t)
+		redirectEndpoint := "https://registry.example.com/redirected/mount/"
+		redirect := response(http.StatusTemporaryRedirect, "")
+		redirect.Header.Set("Location", redirectEndpoint)
+		tc.transport.EXPECT().
+			RoundTrip(postRequestFor(mountEndpoint)).
+			Return(redirect, nil).Once()
+		tc.transport.EXPECT().
+			RoundTrip(postRequestFor(redirectEndpoint)).
+			RunAndReturn(func(req *http.Request) (*http.Response, error) {
+				resp := sessionResponse(http.StatusAccepted, "session")
+				resp.Request = req
+				return resp, nil
+			}).Once()
+		expectDelete(tc, redirectEndpoint+"session")
+
+		mounted, err := tc.client.Mount(t.Context(), dst, src, dgst)
+
+		require.NoError(t, err)
+		assert.False(t, mounted)
+	})
+
+	t.Run("returns a cleanup error when DELETE is refused", func(t *testing.T) {
+		tc := newTestContext(t)
+		sessionURL := "https://registry.example.com/v2/dst/blobs/uploads/refused"
+		tc.transport.EXPECT().
+			RoundTrip(postRequestFor(mountEndpoint)).
+			Return(sessionResponse(http.StatusAccepted, sessionURL), nil).Once()
+		tc.transport.EXPECT().
+			RoundTrip(mock.MatchedBy(func(req *http.Request) bool {
+				return req.Method == http.MethodDelete && req.URL.String() == sessionURL
+			})).
+			Return(response(http.StatusInternalServerError, ""), nil).Once()
+
+		mounted, err := tc.client.Mount(t.Context(), dst, src, dgst)
+
+		assert.False(t, mounted)
+		require.ErrorContains(t, err, "cleanup failed")
+		require.ErrorContains(t, err, "registry returned 500")
 	})
 }

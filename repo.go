@@ -3,9 +3,18 @@ package blob
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
+)
+
+// Registry URL schemes shared by request construction and origin matching.
+const (
+	registrySchemeHTTPS = "https"
+	registrySchemeHTTP  = "http"
 )
 
 // Repository addresses a blob store: a registry host plus a repository
@@ -63,7 +72,74 @@ func validateHost(host string) error {
 	case strings.ContainsAny(host, " \t"):
 		return errors.New("host must not contain whitespace")
 	}
+	authority, err := parseRegistryAuthority(host)
+	if err != nil {
+		return err
+	}
+	if authority.port != "" {
+		port, err := strconv.ParseUint(authority.port, 10, 16)
+		if err != nil || port == 0 {
+			return fmt.Errorf("port %q must be a number from 1 to 65535", authority.port)
+		}
+	}
 	return nil
+}
+
+// registryAuthority is the host and optional port parsed from a Repository.
+type registryAuthority struct {
+	// host is the hostname or IP literal without IPv6 brackets.
+	host string
+	// port is the decimal port, or empty when none was specified.
+	port string
+}
+
+// parseRegistryAuthority validates host as a URL authority and separates
+// its hostname from its optional port.
+func parseRegistryAuthority(host string) (registryAuthority, error) {
+	parsed, err := url.Parse("https://" + host)
+	if err != nil {
+		return registryAuthority{}, fmt.Errorf("host and port are malformed: %w", err)
+	}
+	if parsed.User != nil {
+		return registryAuthority{}, errors.New("host must not include user information")
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return registryAuthority{}, errors.New("host must not include a path, query, or fragment")
+	}
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return registryAuthority{}, errors.New("hostname is empty")
+	}
+	if strings.HasSuffix(host, ":") {
+		return registryAuthority{}, errors.New("port is empty")
+	}
+	return registryAuthority{host: hostname, port: parsed.Port()}, nil
+}
+
+// canonicalRegistryAuthority normalizes DNS case, equivalent IP spellings,
+// and the scheme's default port for same-registry comparisons.
+func canonicalRegistryAuthority(host, scheme string) (registryAuthority, error) {
+	authority, err := parseRegistryAuthority(host)
+	if err != nil {
+		return registryAuthority{}, err
+	}
+	if addr, err := netip.ParseAddr(authority.host); err == nil {
+		authority.host = addr.String()
+	} else {
+		authority.host = strings.TrimSuffix(strings.ToLower(authority.host), ".")
+	}
+	if authority.port != "" {
+		port, err := strconv.ParseUint(authority.port, 10, 16)
+		if err != nil || port == 0 {
+			return registryAuthority{}, fmt.Errorf("port %q must be a number from 1 to 65535", authority.port)
+		}
+		authority.port = strconv.FormatUint(port, 10)
+	}
+	if (scheme == registrySchemeHTTPS && authority.port == "443") ||
+		(scheme == registrySchemeHTTP && authority.port == "80") {
+		authority.port = ""
+	}
+	return authority, nil
 }
 
 // validName reports whether name matches the OCI repository name
