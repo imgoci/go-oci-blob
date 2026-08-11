@@ -107,3 +107,20 @@ a fast millisecond policy. Test gotcha: http.TimeFormat (GMT) not RFC1123
 (UTC) for Retry-After date form. All green: -race unit+integration, e2e
 regression both registries, lint, fmt.
 PR: https://github.com/imgoci/go-oci-blob/pull/14 (CI in flight).
+
+## 2026-08-10 22:24 — Phase 4 merged; Phase 5 implemented, PR #15 open
+PR #14 squash-merged (e2e62fa). Phase 5 in worktree `feat/phase5-chunked`:
+WithChunkedUpload(chunkSize) option (values <1 ignored → monolithic stays);
+push.go refactor extracts openSession (returns uploadSession{url, minChunk
+from Oci-Chunk-Min-Length}); chunked.go PATCH loop (Content-Range start-end,
+ContentLength per chunk, Location followed rel/abs per response, Range ack
+parsed via parseRangeAck tolerating bytes= prefix, ack must equal chunk end
+or the upload is abandoned with a descriptive NON-restartable error — ECR
+drops chunks deterministically), empty-body PUT commit reusing commitUpload.
+Outer Phase-4 restart applies to chunked attempts (rewind + fresh session).
+Tests: ack parsing units; scripted 3-chunk capture suite incl. min-length
+widening, ECR-style stalled ack, missing ack, 503 restart w/ rewound reader,
+zero-size blob; e2e chunked 165KiB/64KiB-chunks push+pull green on both
+registries (both implement chunked correctly). Lint gotcha: canonicalheader
+wants Oci-Chunk-Min-Length spelling (Go canonicalizes; wire-equivalent).
+PR: https://github.com/imgoci/go-oci-blob/pull/15 (CI in flight).
