@@ -52,3 +52,6 @@ User made the repo public (rulesets + Pages need public on free plan; first appl
 
 ## 2026-08-10 20:20 — PR #8 merged
 Squash-merged chore/library-shape (master b60c246); main checkout fast-forwarded; worktree removed. Closed obsolete dependabot PRs #1 (goreleaser-action), #2 (attest), #3 (docker/login-action) — their workflows were deleted. PRs #4-6 (setup-go, mise-action, mkdocs-material) remain valid for review. Master CI + Pages deploy running post-merge. Repo reshape is complete: design doc merged, library-only layout, settings applied, release creds set, public visibility, Pages live at https://imgoci.github.io/go-oci-blob/ once deploy finishes.
+
+## 2026-08-10 20:28 — Dependabot PRs addressed
+#4 (setup-go) closed — touched only deleted release workflows (dependabot had already closed it). #5 (mise-action 4.2.4) and #6 (mkdocs-material 9.7.7) squash-merged after confirming dependabot had rebased them onto the renamed project (checked #6's uv.lock for stale template-go-docs name: clean). Rebased my #9 (pymdown-extensions 11.0.1 security bump) onto the new master by restoring master's uv.lock and re-running uv lock --upgrade-package; branch force-pushed, docs build green. #9 merge closes both open Dependabot alerts.
