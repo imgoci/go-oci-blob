@@ -67,12 +67,14 @@ type Repository struct {
 
 func New(opts ...Option) *Client
 
-// Options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool),
-//          WithChunkedUpload(chunkSize int64), WithParallelPull(workers int, chunkSize int64)
+// Client options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool),
+//                 WithChunkedUpload(chunkSize int64), WithParallelPull(workers int, chunkSize int64)
+// Per-call options: WithProgress(fn func(done, total int64))
 
 func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error)
-func (c *Client) Pull(ctx context.Context, repo Repository, dgst digest.Digest) (io.ReadCloser, error)
-func (c *Client) Push(ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader) error
+func (c *Client) Pull(ctx context.Context, repo Repository, dgst digest.Digest, opts ...TransferOption) (io.ReadCloser, error)
+func (c *Client) PullRange(ctx context.Context, repo Repository, dgst digest.Digest, offset, length int64, opts ...TransferOption) (io.ReadCloser, error)
+func (c *Client) Push(ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader, opts ...TransferOption) error
 func (c *Client) Mount(ctx context.Context, dst, src Repository, dgst digest.Digest) (bool, error)
 ```
 
@@ -83,9 +85,20 @@ API decisions:
   reader verifies the digest as bytes flow; the final `Read` returns
   `ErrDigestMismatch` instead of `io.EOF` when the hash does not match.
 - `Push` requires the digest and size up front. Registries need the digest to
-  commit an upload, and the size picks the upload strategy. Callers that
-  stream unknown-size data could pass size `-1`, which would only be valid
-  with `WithChunkedUpload` set; whether v1 supports this is an open question.
+  commit an upload, and the size sets `Content-Length`. Size is mandatory:
+  there is no unknown-length upload. A caller that does not know the size
+  spools the data first and comes back with a number.
+- `PullRange` serves partial blobs through a ranged `GET`. It never verifies
+  the digest: the digest covers the whole blob, so a partial body cannot be
+  checked against it. `Pull` is the verified path; callers that need
+  integrity on partial reads build it above the library.
+- Byte-moving calls take `WithProgress(fn)`. The callback receives cumulative
+  bytes moved and the total (`-1` when unknown), runs synchronously on the
+  transfer path, and must return quickly. A caller-side wrapper cannot do
+  this job: on push the library consumes the reader internally, and a
+  wrapped reader double-counts bytes when a retry restarts the upload. The
+  library reports committed progress instead. Parallel pull reports one
+  aggregated count.
 - `Mount` returns `(false, nil)` when the registry declines the mount. The
   caller then decides whether to push. Mount-with-automatic-push-fallback can
   be layered on later if real use shows the need.
@@ -199,11 +212,3 @@ Parallel pull is the library's one extra feature. It is off by default;
   stream. The toggle states intent, not a requirement.
 - A scatter-write variant (`io.WriterAt` sink) was rejected: it would add a
   second pull API and break streaming verification for little gain.
-
-## Open questions
-
-- Does v1 accept size `-1` on `Push` for unknown-length streams?
-- Should `Pull` also offer a ranged variant (`PullRange`) for callers that
-  want partial blobs?
-- Is a progress callback worth its API surface, or do callers wrap the
-  reader themselves?
