@@ -186,7 +186,10 @@ func (b *uploadBody) pump() {
 		return
 	}
 	bufferSize := min(int64(uploadBodyBufferSize), b.exact.expected)
-	bufferCount := min(uploadBodyBufferCount, int(1+(b.exact.expected-1)/bufferSize))
+	bufferCount := int(min(
+		int64(uploadBodyBufferCount),
+		1+(b.exact.expected-1)/bufferSize,
+	))
 	b.stateMu.Lock()
 	b.bufferCount = bufferCount
 	for i := range bufferCount {
