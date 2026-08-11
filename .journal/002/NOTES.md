@@ -88,3 +88,22 @@ Confirmed recurring: golangci-lint shared-cache phantom findings appear after
 every worktree removal (this time ../feat-phase2-pull paths). Habit adopted:
 `golangci-lint cache clean` after removing a worktree. Promote to TECH_NOTES
 at close.
+
+## 2026-08-10 22:17 — Phase 3 merged; Phase 4 implemented, PR #14 open
+PR #13 squash-merged (6af7ba4). Phase 4 in worktree `feat/phase4-reliability`:
+retry.go (RetryPolicy MaxAttempts/InitialDelay/MaxDelay; WithRetryPolicy;
+DefaultRetryPolicy 4×/250ms/30s ON by default; full-jitter backoff;
+Retry-After seconds+HTTP-date honored capped by MaxDelay; retry on transport
+errs/429/5xx only; ctx cancel stops all; shared doRetry drains intermediate
+bodies, returns final resp uninterpreted). resume.go (resumeReader under the
+verifyReader: ranged GET from last delivered byte, 206 continue / 200
+discard-replayed-prefix, zero-progress stall budget = policy attempts).
+push.go (whole-flow restart from reader's captured start position via
+io.Seeker; clean error naming io.Seeker when non-seekable; registryError now
+carries retryAfter so restarts honor it; pushOnce/(bool,error) retryability
+classification). Mount/Exists/get through doRetry. Zero-value RetryPolicy =
+no retries; scripted tests default to it (newTestContext), retry suite uses
+a fast millisecond policy. Test gotcha: http.TimeFormat (GMT) not RFC1123
+(UTC) for Retry-After date form. All green: -race unit+integration, e2e
+regression both registries, lint, fmt.
+PR: https://github.com/imgoci/go-oci-blob/pull/14 (CI in flight).
