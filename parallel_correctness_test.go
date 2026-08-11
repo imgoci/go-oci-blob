@@ -519,6 +519,55 @@ func TestParallelPullValidatesEveryContentRange(t *testing.T) {
 	})
 }
 
+// TestParallelPullBoundsShortPartialResponses proves compliant fragmentation
+// remains supported without allowing unbounded continuation requests.
+func TestParallelPullBoundsShortPartialResponses(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+
+	tests := []struct {
+		name      string
+		fragments int64
+		wantErr   bool
+	}{
+		{name: "accepts sixteen fragments", fragments: 16},
+		{name: "refuses a seventeenth fragment", fragments: 17, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := strings.Repeat("x", int(tt.fragments+1))
+			dgst := digest.FromString(content)
+			var requests atomic.Int64
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				var start, end int64
+				if _, err := fmt.Sscanf(req.Header.Get("Range"), "bytes=%d-%d", &start, &end); err != nil {
+					return nil, err
+				}
+				return rangedResponse(content, start, start), nil
+			})
+			client := blob.New(
+				blob.WithTransport(transport),
+				blob.WithRetryPolicy(blob.RetryPolicy{}),
+				blob.WithParallelPull(1, tt.fragments),
+			)
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, readErr := io.ReadAll(rc)
+			require.NoError(t, rc.Close())
+			assert.Equal(t, int64(17), requests.Load(),
+				"one probe plus at most sixteen continuation responses may be sent")
+			if tt.wantErr {
+				require.ErrorContains(t, readErr, "more than 16 partial responses")
+				assert.Equal(t, content[:1], string(got))
+				return
+			}
+			require.NoError(t, readErr)
+			assert.Equal(t, content, string(got))
+		})
+	}
+}
+
 func TestParallelPullLargeConfigurationDoesNotPreallocate(t *testing.T) {
 	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
 	content := "x"

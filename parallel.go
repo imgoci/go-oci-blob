@@ -25,6 +25,12 @@ var errParallelPullClosed = errors.New("blob: parallel pull closed")
 // parallelReadBufferSize bounds each incremental body read.
 const parallelReadBufferSize = 32 << 10
 
+// maxParallelRangeParts bounds successful partial responses per scheduled
+// chunk. Normal registries satisfy a range in one response; sixteen still
+// tolerates 64 KiB server-side fragments for a 1 MiB chunk without allowing
+// unbounded request amplification.
+const maxParallelRangeParts = 16
+
 // chunkResult carries one fetched chunk (or its failure) to the
 // in-order reader.
 type chunkResult struct {
@@ -476,7 +482,14 @@ func (c *Client) fetchChunk(
 ) chunkResult {
 	data := p.pool.take()
 	end := start + want - 1
+	parts := 0
 	for cursor := start; cursor <= end; {
+		if parts == maxParallelRangeParts {
+			p.pool.put(data)
+			return chunkResult{err: fmt.Errorf(
+				"fetching chunk bytes=%d-%d: registry split the range across more than %d partial responses",
+				start, end, maxParallelRangeParts)}
+		}
 		var next int64
 		var err error
 		data, next, err = c.fetchRangePart(ctx, target, cursor, end, total, data, p, attempts)
@@ -485,6 +498,7 @@ func (c *Client) fetchChunk(
 			return chunkResult{err: err}
 		}
 		cursor = next
+		parts++
 	}
 	return chunkResult{data: data}
 }
