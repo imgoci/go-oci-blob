@@ -223,12 +223,18 @@ scripted-conversation suite is the largest of the three.
 ## Performance
 
 - Stream everything. No code path holds a whole blob in memory (P2).
-- Upload request bodies use a fixed 32 KiB scratch buffer so transport `Close`
-  can unblock network reads without giving up safe ownership of the caller's
-  source reader.
-- Copy loops reuse buffers from a `sync.Pool`.
-- Connection reuse and HTTP/2 come from the injected transport; the client
-  never defeats them by closing bodies early or rebuilding clients.
+- Upload request bodies stage up to four 256 KiB batches. This removes a
+  scheduler handoff for every small transport read while preserving prompt
+  `Close` and caller-reader ownership. Small bodies allocate proportionally;
+  active staging is capped at 1 MiB per request, and the process retains at
+  most 2 MiB of idle upload buffers.
+- Parallel chunk buffers use a bounded client cache rather than `sync.Pool`.
+  The cache retains at most one buffer per configured worker and drops excess
+  buffers returned by concurrent pulls.
+- Connection reuse and HTTP/2 come from the transport. For parallel pulls, the
+  client sizes its library-owned default HTTP/1 idle pool to the worker count;
+  caller-supplied transports remain caller-tuned. The client never defeats
+  reuse by closing bodies early or rebuilding clients.
 
 Parallel pull is the library's one extra feature. It is off by default;
 `WithParallelPull(workers, chunkSize)` turns it on.
@@ -236,13 +242,17 @@ Parallel pull is the library's one extra feature. It is off by default;
 - `Pull` keeps the same signature and still returns a verifying
   `io.ReadCloser`. Workers fetch ranged `GET`s concurrently; the reader
   emits chunks in order, so digest verification works unchanged.
+- A fixed worker set handles every chunk. Goroutine and task-channel counts
+  therefore follow the configured worker count rather than the blob's chunk
+  count.
 - Payload buffering is bounded by roughly `workers × chunkSize`, and active
   response bodies are bounded by `workers`; the initial range probe consumes
   one of those worker slots. This is the one deliberate exception to "never
   buffer", and the caller sets that bound.
 - Validate each ranged response's start, end, and total. A registry may return
   a shorter valid portion, which the same worker completes without changing
-  output order.
+  output order. One scheduled chunk accepts at most 16 successful portions, so
+  a pathological server cannot turn one range into an unbounded request loop.
 - Closing the reader cancels the probe, queued work, active bodies, and retry
   backoff before returning. A progress callback may request that close without
   waiting on its own worker result.
