@@ -16,3 +16,6 @@ Validation passed on the final tree: `go test -race -shuffle=on -count=10 ./...`
 
 ## 2026-08-11 10:16 — Pull request opened
 Pushed `feat/correctness-hardening` at `3a683d7f5b9eab2d35611f7334f8a3a6d121da8f` and opened ready-for-review PR #20: https://github.com/imgoci/go-oci-blob/pull/20. It targets `master` with the conventional title `fix: harden OCI transfer correctness`. GitHub reports the PR as open and mergeable; hosted checks had not started when the PR was verified. No merge or session close was requested.
+
+## 2026-08-11 10:51 — Close
+After user approval and green CI, CodeQL, and Pages checks, PR #20 was squash-merged to `master` as `c9b5bd159eca2d972a5add281fc96b2876ba5d1f`. The local default checkout was fast-forwarded to that commit, and Worktrunk removed `feat/correctness-hardening` plus its worktree. The audit's confirmed defects are fixed and documented; focused adversarial review found no remaining reproducible issue. Phase 8 documentation and first-release work remain outside this session.
