@@ -53,10 +53,3 @@ func TestParseContentRange(t *testing.T) {
 		})
 	}
 }
-
-func TestParseContentRangeTotal(t *testing.T) {
-	total, ok := parseContentRangeTotal("bytes 0-4/5")
-
-	assert.True(t, ok)
-	assert.Equal(t, int64(5), total)
-}

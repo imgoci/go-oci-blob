@@ -162,13 +162,6 @@ func parseDecimal(text string) (int64, error) {
 	return strconv.ParseInt(text, 10, 64)
 }
 
-// parseContentRangeTotal extracts the total blob size from a valid
-// Content-Range header.
-func parseContentRangeTotal(header string) (int64, bool) {
-	parsed, ok := parseContentRange(header)
-	return parsed.total, ok
-}
-
 // registryError is an error derived from a registry HTTP response.
 type registryError struct {
 	// status is the HTTP status code of the failed response.

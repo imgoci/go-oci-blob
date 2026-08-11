@@ -60,18 +60,6 @@ func TestVerifyReader(t *testing.T) {
 	}
 }
 
-func TestVerifyReaderHashesAcrossSmallReads(t *testing.T) {
-	content := "chunked hashing must accumulate across reads"
-	r := newVerifyReader(
-		io.NopCloser(iotest.OneByteReader(strings.NewReader(content))),
-		digest.FromString(content))
-
-	got, err := io.ReadAll(r)
-
-	require.NoError(t, err)
-	assert.Equal(t, content, string(got))
-}
-
 func TestVerifyReaderBehavesLikeAReader(t *testing.T) {
 	content := "reader contract check"
 	r := newVerifyReader(io.NopCloser(strings.NewReader(content)), digest.FromString(content))

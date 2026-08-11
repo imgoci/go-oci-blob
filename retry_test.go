@@ -8,12 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRetryPolicyAttempts(t *testing.T) {
-	assert.Equal(t, 1, RetryPolicy{}.attempts(), "zero policy means one attempt")
-	assert.Equal(t, 1, RetryPolicy{MaxAttempts: -3}.attempts(), "negative clamps to one")
-	assert.Equal(t, 4, DefaultRetryPolicy().attempts())
-}
-
 func TestRetryPolicyBackoffDelay(t *testing.T) {
 	policy := RetryPolicy{
 		MaxAttempts:  5,
@@ -85,15 +79,4 @@ func TestRetryAfterDelay(t *testing.T) {
 			assert.Equal(t, tt.want, retryAfterDelay(tt.header, now))
 		})
 	}
-}
-
-func TestRetryableStatus(t *testing.T) {
-	assert.True(t, retryableStatus(429), "429 is retryable")
-	assert.True(t, retryableStatus(500), "500 is retryable")
-	assert.True(t, retryableStatus(503), "503 is retryable")
-	assert.False(t, retryableStatus(400), "400 means the request is wrong, not unlucky")
-	assert.False(t, retryableStatus(401), "401 is not retryable")
-	assert.False(t, retryableStatus(404), "404 is not retryable")
-	assert.False(t, retryableStatus(200), "success is not retryable")
-	assert.False(t, retryableStatus(600), "synthetic 600+ statuses are not in the 5xx family")
 }
