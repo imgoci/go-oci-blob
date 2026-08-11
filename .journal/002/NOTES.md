@@ -142,3 +142,20 @@ inside a worker goroutine runs t.FailNow → runtime.Goexit → the worker's
 future never fills → Close drain deadlocks; script prospective chunk
 requests with .Maybe() in failure-path tests.
 PR: https://github.com/imgoci/go-oci-blob/pull/16 (CI in flight).
+
+## 2026-08-10 22:56 — Phase 6 merged; Phase 7 implemented, PR #17 open
+PR #16 squash-merged (ac990d4). Phase 7 in worktree `feat/phase7-progress`:
+WithProgress(fn(done,total)) TransferOption; progress.go with nil-safe
+monotonic progressTracker (mutex-serialized; add() for streamed/aggregated
+bytes, set() for absolute committed positions with high-water suppression,
+setTotal() for late Content-Length/Content-Range totals), progressReader
+(delivered bytes) and countingReader (upload positions). Semantics per path:
+Pull delivered bytes (resume continues count), parallel one aggregated count
+fed per completed chunk (refetch counts once, total from probe), PullRange
+window bytes/length total, monolithic Push attempt-local set() so restarts
+stay silent until passing predecessor, chunked Push commits on each verified
+ack. applyTransferOptions returns the config again (unparam satisfied by
+real use). Tests: tracker units incl. concurrent aggregation; scripted
+monotonic suites for all five paths; e2e regression green both registries.
+PR: https://github.com/imgoci/go-oci-blob/pull/17 (CI in flight).
+Remaining: Phase 8 (docs + v0.1.0 release).
