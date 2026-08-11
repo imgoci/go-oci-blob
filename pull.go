@@ -43,11 +43,12 @@ func (c *Client) Pull(
 	if err := validateTarget(repo, dgst); err != nil {
 		return nil, err
 	}
-	applyTransferOptions(opts)
+	cfg := applyTransferOptions(opts)
+	tracker := newProgressTracker(cfg.progress, -1)
 
 	target := blobURL(c.scheme(), repo, dgst)
 	if c.pullWorkers > 0 {
-		stream, err := c.parallelPull(ctx, target)
+		stream, err := c.parallelPull(ctx, target, tracker)
 		if err != nil {
 			return nil, fmt.Errorf("pulling blob %s from %s/%s: %w", dgst, repo.Host, repo.Name, err)
 		}
@@ -58,8 +59,9 @@ func (c *Client) Pull(
 	if err != nil {
 		return nil, fmt.Errorf("pulling blob %s from %s/%s: %w", dgst, repo.Host, repo.Name, err)
 	}
+	tracker.setTotal(resp.ContentLength)
 	resume := &resumeReader{ctx: ctx, client: c, target: target, body: resp.Body}
-	return newVerifyReader(resume, dgst), nil
+	return newVerifyReader(progressify(resume, tracker), dgst), nil
 }
 
 // PullRange downloads length bytes of a blob starting at offset.
@@ -88,7 +90,8 @@ func (c *Client) PullRange(
 	if length <= 0 {
 		return nil, fmt.Errorf("non-positive length %d", length)
 	}
-	applyTransferOptions(opts)
+	cfg := applyTransferOptions(opts)
+	tracker := newProgressTracker(cfg.progress, length)
 
 	rangeHeader := fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)
 	resp, err := c.get(ctx, blobURL(c.scheme(), repo, dgst), rangeHeader)
@@ -97,7 +100,7 @@ func (c *Client) PullRange(
 			rangeHeader, dgst, repo.Host, repo.Name, err)
 	}
 	if resp.StatusCode == http.StatusPartialContent {
-		return resp.Body, nil
+		return progressify(resp.Body, tracker), nil
 	}
 
 	// The registry ignored the Range header and sent the whole blob;
@@ -108,7 +111,8 @@ func (c *Client) PullRange(
 			return nil, fmt.Errorf("blob %s is shorter than range offset %d: %w", dgst, offset, err)
 		}
 	}
-	return &boundedBody{window: io.LimitReader(resp.Body, length), body: resp.Body}, nil
+	window := &boundedBody{window: io.LimitReader(resp.Body, length), body: resp.Body}
+	return progressify(window, tracker), nil
 }
 
 // get issues a GET for u under the retry policy and returns the
