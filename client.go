@@ -16,6 +16,9 @@ type Client struct {
 
 	// retry bounds how failed requests are re-attempted.
 	retry RetryPolicy
+
+	// chunkSize enables chunked upload when positive.
+	chunkSize int64
 }
 
 // Option configures a Client built by [New].
@@ -30,6 +33,8 @@ type options struct {
 	plainHTTP bool
 	// retry bounds how failed requests are re-attempted.
 	retry RetryPolicy
+	// chunkSize enables chunked upload when positive.
+	chunkSize int64
 }
 
 // New builds a Client from the given options.
@@ -52,6 +57,26 @@ func New(opts ...Option) *Client {
 		httpClient: &http.Client{Transport: o.transport},
 		plainHTTP:  o.plainHTTP,
 		retry:      o.retry,
+		chunkSize:  o.chunkSize,
+	}
+}
+
+// WithChunkedUpload switches Push from the default monolithic upload
+// to chunked PATCH uploads of chunkSize bytes. Values below one are
+// ignored and leave monolithic upload in place.
+//
+// Chunked upload is spec-optional and broken on major hosted
+// registries (ECR discards chunks after the first and still reports
+// success), because mainstream clients never exercise it. It is an
+// explicit opt-in, never a fallback: leave it off unless you have
+// verified your registry against it. The client checks the
+// registry's Range acknowledgement after every chunk and abandons
+// the upload rather than store a blob silently missing bytes.
+func WithChunkedUpload(chunkSize int64) Option {
+	return func(o *options) {
+		if chunkSize > 0 {
+			o.chunkSize = chunkSize
+		}
 	}
 }
 
