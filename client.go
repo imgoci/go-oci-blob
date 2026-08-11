@@ -4,7 +4,6 @@ import (
 	"math"
 	"net/http"
 	"reflect"
-	"sync"
 )
 
 // maxParallelPullWorkers bounds channel capacity and goroutine fan-out for a
@@ -31,9 +30,9 @@ type Client struct {
 	pullWorkers int
 	// pullChunk is the ranged-fetch size for parallel pull.
 	pullChunk int64
-	// bufPool recycles chunk buffers across parallel pulls; nil when
-	// parallel pull is off.
-	bufPool *sync.Pool
+	// bufPool retains at most one reusable chunk buffer per configured worker;
+	// nil when parallel pull is off.
+	bufPool chan []byte
 }
 
 // Option configures a Client built by [New].
@@ -114,7 +113,7 @@ func New(opts ...Option) *Client {
 		pullChunk:   o.pullChunk,
 	}
 	if c.pullWorkers > 0 {
-		c.bufPool = &sync.Pool{}
+		c.bufPool = make(chan []byte, c.pullWorkers)
 	}
 	return c
 }
