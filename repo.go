@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/opencontainers/go-digest"
 )
 
 // Repository addresses a blob store: a registry host plus a repository
@@ -32,6 +34,18 @@ func (r Repository) Validate() error {
 	}
 	if !validName(r.Name) {
 		return fmt.Errorf("invalid repository name %q", r.Name)
+	}
+	return nil
+}
+
+// validateTarget checks the repository/digest pair that every blob
+// operation addresses, before anything reaches the wire.
+func validateTarget(repo Repository, dgst digest.Digest) error {
+	if err := repo.Validate(); err != nil {
+		return err
+	}
+	if err := dgst.Validate(); err != nil {
+		return fmt.Errorf("invalid digest %q: %w", dgst, err)
 	}
 	return nil
 }
