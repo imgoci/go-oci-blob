@@ -70,3 +70,21 @@ deleted file so previously-filtered mockery-mock findings leaked through with
 ../feat-phase1-* paths; `golangci-lint cache clean` fixed it. (2) bodyclose
 flags Pull's escaping response body (verifying reader owns it) — narrow
 nolint with explanation. (3) Note: release-please holds PR #11.
+
+## 2026-08-10 21:51 — Phase 2 merged; Phase 3 implemented, PR #13 open
+PR #12 squash-merged (7f58c57); phase-2 worktree removed. Phase 3 in worktree
+`feat/phase3-push`: push.go (Push: POST upload session → PUT commit with
+digest query; size mandatory → Content-Length; family-tolerant statuses;
+Location resolved rel/abs with session _state preserved; shared c.post
+helper) and mount.go (Mount: POST ?mount=&from=; 201→true; any other 2xx
+incl. spec's 202 decline→(false,nil); cross-host mount rejected pre-wire).
+Tests: scripted-transport integration (PUT capture asserts URL/body/
+Content-Length/Content-Type, off-spec 200s, missing Location, refused
+session, failed commit, mount matrix), e2e push→exists→pull and
+push→mount→exists green on registry:2 + zot with -race. Both registries
+honored the mount (201). PR: https://github.com/imgoci/go-oci-blob/pull/13.
+
+Confirmed recurring: golangci-lint shared-cache phantom findings appear after
+every worktree removal (this time ../feat-phase2-pull paths). Habit adopted:
+`golangci-lint cache clean` after removing a worktree. Promote to TECH_NOTES
+at close.
