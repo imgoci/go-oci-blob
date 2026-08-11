@@ -42,3 +42,11 @@ mirror pins vs moon.yml `mise exec` wrappers.
 
 Next: watch PR #10 CI, merge (squash) when green, then Phase 2 (Pull/
 PullRange + verifying reader).
+
+## 2026-08-10 21:00 — E2E tests moved behind a build tag (user request)
+e2e_test.go now carries `//go:build e2e`; the -short skip is gone. Plain
+`go test ./...` is fast and Docker-free. New moon task root:test-e2e runs
+`go test -tags e2e ./...` and is a dep of root:check, so CI still exercises
+e2e (verified in the CI log: root:test-e2e completed, 11s). .golangci.yml
+gained run.build-tags [e2e] so the tagged file stays linted. Convention for
+later phases: all e2e tests go in e2e-tagged files.
