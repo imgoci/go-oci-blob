@@ -13,6 +13,9 @@ type Client struct {
 
 	// plainHTTP selects http:// instead of https:// for registry URLs.
 	plainHTTP bool
+
+	// retry bounds how failed requests are re-attempted.
+	retry RetryPolicy
 }
 
 // Option configures a Client built by [New].
@@ -25,12 +28,15 @@ type options struct {
 	transport http.RoundTripper
 	// plainHTTP selects http:// registry URLs.
 	plainHTTP bool
+	// retry bounds how failed requests are re-attempted.
+	retry RetryPolicy
 }
 
 // New builds a Client from the given options.
 //
-// With no options the Client uses [http.DefaultTransport] and speaks
-// https. Authentication is the caller's job: inject a transport that
+// With no options the Client uses [http.DefaultTransport], speaks
+// https, and retries transient failures per [DefaultRetryPolicy].
+// Authentication is the caller's job: inject a transport that
 // attaches credentials with [WithTransport].
 //
 // Example:
@@ -38,13 +44,14 @@ type options struct {
 //	client := blob.New(blob.WithTransport(authTransport))
 //	ok, err := client.Exists(ctx, repo, dgst)
 func New(opts ...Option) *Client {
-	o := options{transport: http.DefaultTransport, plainHTTP: false}
+	o := options{transport: http.DefaultTransport, plainHTTP: false, retry: DefaultRetryPolicy()}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	return &Client{
 		httpClient: &http.Client{Transport: o.transport},
 		plainHTTP:  o.plainHTTP,
+		retry:      o.retry,
 	}
 }
 

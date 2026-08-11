@@ -23,12 +23,17 @@ type testContext struct {
 }
 
 // newTestContext wires a client to a mockery transport, applying any
-// extra options after the transport injection.
+// extra options after the transport injection. Retries are off by
+// default so scripted conversations stay single-shot; retry tests
+// opt back in with an explicit policy.
 func newTestContext(t *testing.T, opts ...blob.Option) *testContext {
 	t.Helper()
 
 	transport := mocks.NewRoundTripper(t)
-	opts = append([]blob.Option{blob.WithTransport(transport)}, opts...)
+	opts = append([]blob.Option{
+		blob.WithTransport(transport),
+		blob.WithRetryPolicy(blob.RetryPolicy{}),
+	}, opts...)
 	return &testContext{
 		transport: transport,
 		client:    blob.New(opts...),

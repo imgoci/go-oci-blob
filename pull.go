@@ -19,6 +19,11 @@ import (
 // registry redirects to). Close the reader when done. A missing blob
 // is an error matching [ErrNotFound].
 //
+// A stream that breaks mid-body resumes under the client's
+// [RetryPolicy] with a ranged request from the last delivered byte;
+// digest verification carries across the resume, so no byte is
+// hashed twice.
+//
 // Example:
 //
 //	rc, err := client.Pull(ctx, repo, dgst)
@@ -37,11 +42,13 @@ func (c *Client) Pull(
 	}
 	applyTransferOptions(opts)
 
-	resp, err := c.get(ctx, blobURL(c.scheme(), repo, dgst), "") //nolint:bodyclose // verifying reader owns the body
+	target := blobURL(c.scheme(), repo, dgst)
+	resp, err := c.get(ctx, target, "") //nolint:bodyclose // verifying reader owns the body
 	if err != nil {
 		return nil, fmt.Errorf("pulling blob %s from %s/%s: %w", dgst, repo.Host, repo.Name, err)
 	}
-	return newVerifyReader(resp.Body, dgst), nil
+	resume := &resumeReader{ctx: ctx, client: c, target: target, body: resp.Body}
+	return newVerifyReader(resume, dgst), nil
 }
 
 // PullRange downloads length bytes of a blob starting at offset.
@@ -93,20 +100,22 @@ func (c *Client) PullRange(
 	return &boundedBody{window: io.LimitReader(resp.Body, length), body: resp.Body}, nil
 }
 
-// get issues a GET for u and returns the response only when the
-// status sits in the 2xx family. On any other status it interprets
-// the error body, closes the response, and returns the error. A
-// non-empty rangeHeader is sent as the Range header.
+// get issues a GET for u under the retry policy and returns the
+// response only when the status sits in the 2xx family. On any other
+// status it interprets the error body, closes the response, and
+// returns the error. A non-empty rangeHeader is sent as the Range
+// header.
 func (c *Client) get(ctx context.Context, u *url.URL, rangeHeader string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
-	}
-	if rangeHeader != "" {
-		req.Header.Set("Range", rangeHeader)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("building request: %w", err)
+		}
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return nil, err
 	}
