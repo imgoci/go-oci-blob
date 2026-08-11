@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,6 +111,73 @@ func TestParallelPullClose(t *testing.T) {
 	})
 }
 
+// TestParallelPullCloseInterruptsRejectedChunkBodies proves every body owned by
+// a worker remains interruptible even when validation or error parsing reads it.
+func TestParallelPullCloseInterruptsRejectedChunkBodies(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+	content := "0123456789abcdefghij"
+	dgst := digest.FromString(content)
+	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
+
+	tests := []struct {
+		name     string
+		response func(*blockingBody) *http.Response
+	}{
+		{
+			name: "invalid content range",
+			response: func(body *blockingBody) *http.Response {
+				resp := response(http.StatusPartialContent, "")
+				resp.Header.Set("Content-Range", "bytes 11-19/20")
+				resp.Body = body
+				return resp
+			},
+		},
+		{
+			name: "ignored range",
+			response: func(body *blockingBody) *http.Response {
+				resp := response(http.StatusOK, "")
+				resp.Body = body
+				return resp
+			},
+		},
+		{
+			name: "registry error",
+			response: func(body *blockingBody) *http.Response {
+				resp := response(http.StatusServiceUnavailable, "")
+				resp.Body = body
+				return resp
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newTestContext(t, blob.WithParallelPull(2, 10))
+			expectRange(tc, endpoint, content, 0, 9)
+			body := newBlockingBody()
+			tc.transport.EXPECT().
+				RoundTrip(getRequestFor(endpoint, "bytes=10-19")).
+				Return(tt.response(body), nil).Once()
+
+			rc, err := tc.client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			select {
+			case <-body.started:
+			case <-time.After(time.Second):
+				t.Fatal("worker did not start reading the rejected response body")
+			}
+
+			closed := make(chan error, 1)
+			go func() { closed <- rc.Close() }()
+			select {
+			case closeErr := <-closed:
+				require.NoError(t, closeErr)
+			case <-time.After(time.Second):
+				t.Fatal("Close did not interrupt the rejected response body")
+			}
+		})
+	}
+}
+
 // roundTripFunc adapts a function into an HTTP transport.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -207,6 +275,58 @@ func TestParallelPullRetryBudget(t *testing.T) {
 			_, err = io.ReadAll(rc)
 			require.ErrorContains(t, err, tt.wantErr)
 			require.NoError(t, rc.Close())
+		})
+	}
+}
+
+// TestParallelPullDoesNotRetryDeterministicRedirectFailures proves an outer
+// retry budget never repeats a redirect chain that cannot succeed unchanged.
+func TestParallelPullDoesNotRetryDeterministicRedirectFailures(t *testing.T) {
+	content := "0123456789abcdefghij"
+	dgst := digest.FromString(content)
+
+	tests := []struct {
+		name         string
+		probeWorks   bool
+		wantRequests int32
+	}{
+		{name: "probe", wantRequests: 10},
+		{name: "later chunk", probeWorks: true, wantRequests: 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if tt.probeWorks && r.Header.Get("Range") == "bytes=0-9" {
+					w.Header().Set("Content-Range", "bytes 0-9/20")
+					w.WriteHeader(http.StatusPartialContent)
+					_, _ = io.WriteString(w, content[:10])
+					return
+				}
+				w.Header().Set("Location", r.URL.RequestURI())
+				w.WriteHeader(http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(server.Close)
+
+			client := blob.New(
+				blob.WithPlainHTTP(true),
+				blob.WithParallelPull(1, 10),
+				blob.WithRetryPolicy(fastRetry()),
+			)
+			repo := blob.Repository{Host: strings.TrimPrefix(server.URL, "http://"), Name: "library/ubuntu"}
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			if tt.probeWorks {
+				require.NoError(t, err)
+				_, err = io.ReadAll(rc)
+				require.NoError(t, rc.Close())
+			} else {
+				assert.Nil(t, rc)
+			}
+			require.ErrorContains(t, err, "exceeded the redirect limit")
+			assert.Equal(t, tt.wantRequests, requests.Load(),
+				"the outer retry budget must not repeat a deterministic redirect chain")
 		})
 	}
 }
@@ -397,6 +517,55 @@ func TestParallelPullValidatesEveryContentRange(t *testing.T) {
 		require.ErrorContains(t, err, "invalid Content-Range")
 		require.NoError(t, rc.Close())
 	})
+}
+
+// TestParallelPullBoundsShortPartialResponses proves compliant fragmentation
+// remains supported without allowing unbounded continuation requests.
+func TestParallelPullBoundsShortPartialResponses(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+
+	tests := []struct {
+		name      string
+		fragments int64
+		wantErr   bool
+	}{
+		{name: "accepts sixteen fragments", fragments: 16},
+		{name: "refuses a seventeenth fragment", fragments: 17, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := strings.Repeat("x", int(tt.fragments+1))
+			dgst := digest.FromString(content)
+			var requests atomic.Int64
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				var start, end int64
+				if _, err := fmt.Sscanf(req.Header.Get("Range"), "bytes=%d-%d", &start, &end); err != nil {
+					return nil, err
+				}
+				return rangedResponse(content, start, start), nil
+			})
+			client := blob.New(
+				blob.WithTransport(transport),
+				blob.WithRetryPolicy(blob.RetryPolicy{}),
+				blob.WithParallelPull(1, tt.fragments),
+			)
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, readErr := io.ReadAll(rc)
+			require.NoError(t, rc.Close())
+			assert.Equal(t, int64(17), requests.Load(),
+				"one probe plus at most sixteen continuation responses may be sent")
+			if tt.wantErr {
+				require.ErrorContains(t, readErr, "more than 16 partial responses")
+				assert.Equal(t, content[:1], string(got))
+				return
+			}
+			require.NoError(t, readErr)
+			assert.Equal(t, content, string(got))
+		})
+	}
 }
 
 func TestParallelPullLargeConfigurationDoesNotPreallocate(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"math"
 	"net/http"
 	"reflect"
-	"sync"
 )
 
 // maxParallelPullWorkers bounds channel capacity and goroutine fan-out for a
@@ -31,9 +30,9 @@ type Client struct {
 	pullWorkers int
 	// pullChunk is the ranged-fetch size for parallel pull.
 	pullChunk int64
-	// bufPool recycles chunk buffers across parallel pulls; nil when
-	// parallel pull is off.
-	bufPool *sync.Pool
+	// bufPool retains at most one reusable chunk buffer per configured worker;
+	// nil when parallel pull is off.
+	bufPool chan []byte
 }
 
 // Option configures a Client built by [New].
@@ -44,8 +43,14 @@ type Option func(*options)
 type options struct {
 	// transport is the caller-injected port for registry-origin I/O.
 	transport http.RoundTripper
+	// transportConfigured records that transport is caller-owned and must not
+	// be replaced by library default tuning.
+	transportConfigured bool
 	// storageTransport handles requests outside the registry origin.
 	storageTransport http.RoundTripper
+	// storageTransportConfigured records that storageTransport is caller-owned
+	// and must not be replaced by library default tuning.
+	storageTransportConfigured bool
 	// plainHTTP selects http:// registry URLs.
 	plainHTTP bool
 	// retry bounds how failed requests are re-attempted.
@@ -81,11 +86,23 @@ func New(opts ...Option) *Client {
 			opt(&o)
 		}
 	}
+	registryTransport := o.transport
+	storageTransport := o.storageTransport
+	if o.pullWorkers > http.DefaultMaxIdleConnsPerHost &&
+		(!o.transportConfigured || !o.storageTransportConfigured) {
+		parallelDefault := defaultTransportForParallelPull(o.pullWorkers)
+		if !o.transportConfigured {
+			registryTransport = parallelDefault
+		}
+		if !o.storageTransportConfigured {
+			storageTransport = parallelDefault
+		}
+	}
 	c := &Client{
 		httpClient: &http.Client{
 			Transport: &scopedTransport{
-				registry: o.transport,
-				storage:  o.storageTransport,
+				registry: registryTransport,
+				storage:  storageTransport,
 			},
 			CheckRedirect: checkRedirect,
 		},
@@ -96,9 +113,28 @@ func New(opts ...Option) *Client {
 		pullChunk:   o.pullChunk,
 	}
 	if c.pullWorkers > 0 {
-		c.bufPool = &sync.Pool{}
+		c.bufPool = make(chan []byte, c.pullWorkers)
 	}
 	return c
+}
+
+// defaultTransportForParallelPull clones the process default and raises its
+// ordinary idle limits for the configured pull workers. Explicitly disabled
+// idle pools and non-standard replacements are returned without being
+// overridden because the library cannot safely tune them.
+func defaultTransportForParallelPull(workers int) http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	transport := base.Clone()
+	if transport.MaxIdleConns > 0 && transport.MaxIdleConns < workers {
+		transport.MaxIdleConns = workers
+	}
+	if transport.MaxIdleConnsPerHost >= 0 && transport.MaxIdleConnsPerHost < workers {
+		transport.MaxIdleConnsPerHost = workers
+	}
+	return transport
 }
 
 // WithParallelPull switches Pull to fetch blobs with workers
@@ -114,7 +150,9 @@ func New(opts ...Option) *Client {
 // exception to never buffering — and the caller sets that bound with
 // these two parameters. When the registry does not serve ranges,
 // Pull quietly falls back to a single stream: the toggle states
-// intent, not a requirement.
+// intent, not a requirement. The library sizes its default HTTP/1 idle pool
+// for the requested worker count. Caller-supplied transports are not modified;
+// configure their connection pools for the intended concurrency.
 func WithParallelPull(workers int, chunkSize int64) Option {
 	return func(o *options) {
 		if workers > 0 && workers <= maxParallelPullWorkers && chunkSize > 0 &&
@@ -149,11 +187,12 @@ func WithChunkedUpload(chunkSize int64) Option {
 // injected: pass an authenticated transport from a library such as
 // oras-go or go-containerregistry. Off-origin redirects and absolute
 // upload locations do not pass through this transport. A nil or typed-nil
-// transport keeps [http.DefaultTransport].
+// transport keeps the library-managed default transport.
 func WithTransport(rt http.RoundTripper) Option {
 	return func(o *options) {
 		if !isNilValue(rt) {
 			o.transport = rt
+			o.transportConfigured = true
 		}
 	}
 }
@@ -162,11 +201,12 @@ func WithTransport(rt http.RoundTripper) Option {
 // storage and CDN requests. It receives requests after registry credentials,
 // cookies, proxy credentials, and referrer data have been removed; use it for
 // storage-specific TLS, proxy, or authentication behavior. A nil or typed-nil
-// transport keeps [http.DefaultTransport].
+// transport keeps the library-managed default transport.
 func WithStorageTransport(rt http.RoundTripper) Option {
 	return func(o *options) {
 		if !isNilValue(rt) {
 			o.storageTransport = rt
+			o.storageTransportConfigured = true
 		}
 	}
 }

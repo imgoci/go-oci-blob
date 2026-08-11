@@ -25,18 +25,76 @@ var errParallelPullClosed = errors.New("blob: parallel pull closed")
 // parallelReadBufferSize bounds each incremental body read.
 const parallelReadBufferSize = 32 << 10
 
+// maxParallelRangeParts bounds successful partial responses per scheduled
+// chunk. Normal registries satisfy a range in one response; sixteen still
+// tolerates 64 KiB server-side fragments for a 1 MiB chunk without allowing
+// unbounded request amplification.
+const maxParallelRangeParts = 16
+
 // chunkResult carries one fetched chunk (or its failure) to the
 // in-order reader.
 type chunkResult struct {
-	// buf is the pooled backing buffer to recycle after draining.
-	buf *[]byte
-	// data is the chunk's bytes within buf.
+	// index is the chunk's position in the ordered result stream.
+	index int64
+	// data is the chunk's pooled backing buffer and readable bytes.
 	data []byte
 	// err reports a chunk that could not be fetched.
 	err error
 	// slot records that this result owns one concurrency-and-buffer
 	// token until the reader consumes or discards it.
 	slot bool
+}
+
+// chunkTask describes one complete ordered chunk to fetch.
+type chunkTask struct {
+	// index is the chunk's position in the ordered result stream.
+	index int64
+	// start is the first byte to fetch.
+	start int64
+	// want is the complete chunk length.
+	want int64
+	// total is the blob's complete length.
+	total int64
+	// probeBody is the already-open first response, when this is the probe task.
+	probeBody *trackedBody
+	// probeAttempts is the retry budget already spent opening probeBody.
+	probeAttempts int
+}
+
+// chunkBufferPool bounds the client's reusable payload buffers explicitly,
+// unlike [sync.Pool] entries whose retained count is runtime-controlled.
+type chunkBufferPool struct {
+	// buffers holds at most one reusable payload buffer per worker slot.
+	buffers chan []byte
+}
+
+// newChunkBufferPool wraps the client's bounded concurrent buffer reserve.
+func newChunkBufferPool(buffers chan []byte) *chunkBufferPool {
+	return &chunkBufferPool{buffers: buffers}
+}
+
+// take returns one empty reusable buffer, or nil when every retained buffer is
+// already in use.
+func (p *chunkBufferPool) take() []byte {
+	select {
+	case buf := <-p.buffers:
+		return buf[:0]
+	default:
+		return nil
+	}
+}
+
+// put makes buf available to another task in the same pull.
+func (p *chunkBufferPool) put(buf []byte) {
+	if buf == nil {
+		return
+	}
+	select {
+	case p.buffers <- buf[:0]:
+	default:
+		// The worker-slot invariant normally makes this unreachable. Dropping
+		// the buffer is safer than blocking cleanup if cancellation wins a race.
+	}
 }
 
 // trackedBody lets Close interrupt response-body reads even when a
@@ -68,21 +126,23 @@ type parallelPuller struct {
 	ctx context.Context
 	// cancel stops the dispatcher and every in-flight fetch.
 	cancel context.CancelFunc
-	// results delivers one future per chunk, in chunk order.
-	results chan chan chunkResult
+	// results receives completed chunks from the fixed worker set.
+	results chan chunkResult
 	// slots bounds response bodies plus completed buffers together.
 	slots chan struct{}
-	// pool recycles chunk buffers.
-	pool *sync.Pool
+	// pool recycles chunk buffers through the client's bounded reserve.
+	pool *chunkBufferPool
 
 	// mu protects reader state, closure, and active response bodies.
 	mu sync.Mutex
 	// active contains bodies Close can interrupt.
 	active map[*trackedBody]struct{}
-	// current is the chunk being drained, backed by currentBuf.
+	// pending holds out-of-order worker results by chunk index.
+	pending map[int64]chunkResult
+	// next is the next chunk index the reader must emit.
+	next int64
+	// current is the chunk being drained.
 	current []byte
-	// currentBuf is returned to the pool once current is drained.
-	currentBuf *[]byte
 	// currentSlot records that current owns one slot.
 	currentSlot bool
 	// pos is the read position within current.
@@ -149,13 +209,15 @@ func (c *Client) parallelPull(
 	}
 
 	tracker.setTotal(parsed.total)
+	workerCount := parallelWorkerCount(c.pullWorkers, c.pullChunk, parsed.end+1, parsed.total)
 	puller := &parallelPuller{
 		ctx:     pullCtx,
 		cancel:  cancel,
-		results: make(chan chan chunkResult, c.pullWorkers),
-		slots:   make(chan struct{}, c.pullWorkers),
-		pool:    c.bufPool,
+		results: make(chan chunkResult, workerCount),
+		slots:   make(chan struct{}, workerCount),
+		pool:    newChunkBufferPool(c.bufPool),
 		active:  make(map[*trackedBody]struct{}),
+		pending: make(map[int64]chunkResult, workerCount),
 	}
 	// The already-open probe consumes one worker/buffer slot.
 	puller.slots <- struct{}{}
@@ -164,8 +226,25 @@ func (c *Client) parallelPull(
 		cancel()
 		return nil, errParallelPullClosed
 	}
-	go puller.dispatch(c, target, parsed, probeBody, probeAttempts)
+	go puller.dispatch(c, target, parsed, probeBody, probeAttempts, workerCount)
 	return progressify(puller, tracker), nil
+}
+
+// parallelWorkerCount limits the fixed worker set to chunks this pull can
+// actually issue. firstUnscheduled is the first byte after the probe body.
+func parallelWorkerCount(configured int, chunk, firstUnscheduled, total int64) int {
+	chunks := int64(1)
+	remaining := total - firstUnscheduled
+	if remaining > 0 {
+		chunks += remaining / chunk
+		if remaining%chunk != 0 {
+			chunks++
+		}
+	}
+	if chunks >= int64(configured) {
+		return configured
+	}
+	return int(chunks)
 }
 
 // cancelBody couples the probe request's context to fallback-body
@@ -230,7 +309,7 @@ func (c *Client) parallelProbe(
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, attempt, ctxErr
 			}
-			if attempt == attempts {
+			if !retryableRequestError(err) || attempt == attempts {
 				return nil, attempt, err
 			}
 			if err := sleepContext(ctx, c.retry.backoffDelay(attempt, 0)); err != nil {
@@ -272,103 +351,123 @@ func (c *Client) rangeRequest(
 	return resp, nil
 }
 
-// dispatch schedules every chunk fetch, keeping response bodies plus
-// completed buffers within the configured worker count. probeBody is
-// the already-open response for the first returned interval.
+// dispatch feeds a fixed worker set with every chunk fetch, keeping response
+// bodies plus completed buffers within workerCount. probeBody is the already-
+// open response for the first returned interval.
 func (p *parallelPuller) dispatch(
 	c *Client,
 	target *url.URL,
 	probeRange contentRange,
 	probeBody *trackedBody,
 	probeAttempts int,
+	workerCount int,
 ) {
-	defer close(p.results)
-	if !p.scheduleProbe(c, target, probeRange, probeBody, probeAttempts) {
+	tasks := make(chan chunkTask, workerCount)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			p.work(c, target, tasks)
+		}()
+	}
+
+	defer func() {
+		close(tasks)
+		workers.Wait()
+		close(p.results)
+	}()
+
+	probeTask := chunkTask{
+		index:         0,
+		start:         probeRange.start,
+		want:          probeRange.end - probeRange.start + 1,
+		total:         probeRange.total,
+		probeBody:     probeBody,
+		probeAttempts: probeAttempts,
+	}
+	if !p.enqueueProbe(tasks, probeTask) {
 		return
 	}
 
+	index := int64(1)
 	chunk := c.pullChunk
-	for start := probeRange.end + 1; start < probeRange.total; {
+	for start := probeRange.end + 1; start < probeRange.total; index++ {
 		want := min(chunk, probeRange.total-start)
-		if !p.scheduleChunk(c, target, start, want, probeRange.total) {
+		if !p.enqueueChunk(tasks, chunkTask{
+			index: index,
+			start: start,
+			want:  want,
+			total: probeRange.total,
+		}) {
 			return
 		}
 		start += want
 	}
 }
 
-// scheduleProbe enqueues and starts the already-open first range body.
-func (p *parallelPuller) scheduleProbe(
-	c *Client,
-	target *url.URL,
-	probeRange contentRange,
-	probeBody *trackedBody,
-	probeAttempts int,
-) bool {
-	if p.ctx.Err() != nil {
-		p.untrackAndClose(probeBody)
-		p.releaseResult(chunkResult{slot: true})
-		return false
-	}
-	first := make(chan chunkResult, 1)
+// enqueueProbe sends the already-slot-owning probe task to a worker.
+func (p *parallelPuller) enqueueProbe(tasks chan<- chunkTask, task chunkTask) bool {
 	select {
-	case p.results <- first:
+	case tasks <- task:
+		return true
 	case <-p.ctx.Done():
-		p.untrackAndClose(probeBody)
+		p.untrackAndClose(task.probeBody)
 		p.releaseResult(chunkResult{slot: true})
 		return false
 	}
-	go func() {
-		want := probeRange.end - probeRange.start + 1
-		buf, data, err := readChunkInto(p.pool, probeBody, want)
-		p.untrackAndClose(probeBody)
-		if err == nil {
-			first <- chunkResult{buf: buf, data: data, slot: true}
-			return
-		}
-		if ctxErr := p.ctx.Err(); ctxErr != nil {
-			first <- chunkResult{err: ctxErr, slot: true}
-			return
-		}
-		remaining := c.retry.attempts() - probeAttempts
-		if remaining <= 0 {
-			first <- chunkResult{err: fmt.Errorf("reading probe range: %w", err), slot: true}
-			return
-		}
-		first <- c.fetchChunk(p.ctx, target, 0, want, probeRange.total, p, remaining)
-	}()
-	return true
 }
 
-// scheduleChunk reserves one slot, enqueues its future in order, and starts
-// the ranged fetch unless cancellation wins first.
-func (p *parallelPuller) scheduleChunk(
-	c *Client, target *url.URL, start, want, total int64,
-) bool {
+// enqueueChunk reserves one body-or-buffer slot before sending task to a
+// worker. The worker's result owns the slot until the reader consumes it.
+func (p *parallelPuller) enqueueChunk(tasks chan<- chunkTask, task chunkTask) bool {
 	select {
 	case p.slots <- struct{}{}:
 	case <-p.ctx.Done():
 		return false
 	}
-	if p.ctx.Err() != nil {
-		p.releaseResult(chunkResult{slot: true})
-		return false
-	}
-	future := make(chan chunkResult, 1)
 	select {
-	case p.results <- future:
+	case tasks <- task:
+		return true
 	case <-p.ctx.Done():
 		p.releaseResult(chunkResult{slot: true})
 		return false
 	}
-	if ctxErr := p.ctx.Err(); ctxErr != nil {
-		future <- chunkResult{err: ctxErr, slot: true}
-		return false
+}
+
+// work fetches tasks until dispatch closes the queue or the pull is canceled.
+func (p *parallelPuller) work(c *Client, target *url.URL, tasks <-chan chunkTask) {
+	for task := range tasks {
+		result := p.fetchTask(c, target, task)
+		result.index = task.index
+		result.slot = true
+		select {
+		case p.results <- result:
+		case <-p.ctx.Done():
+			p.releaseResult(result)
+		}
 	}
-	go func() {
-		future <- c.fetchChunk(p.ctx, target, start, want, total, p, c.retry.attempts())
-	}()
-	return true
+}
+
+// fetchTask reads the existing probe body or opens the task's ranged request.
+func (p *parallelPuller) fetchTask(c *Client, target *url.URL, task chunkTask) chunkResult {
+	if task.probeBody == nil {
+		return c.fetchChunk(p.ctx, target, task.start, task.want, task.total, p, c.retry.attempts())
+	}
+
+	data, err := readChunkInto(p.pool, task.probeBody, task.want)
+	p.untrackAndClose(task.probeBody)
+	if err == nil {
+		return chunkResult{data: data}
+	}
+	if ctxErr := p.ctx.Err(); ctxErr != nil {
+		return chunkResult{err: ctxErr}
+	}
+	remaining := c.retry.attempts() - task.probeAttempts
+	if remaining <= 0 {
+		return chunkResult{err: fmt.Errorf("reading probe range: %w", err)}
+	}
+	return c.fetchChunk(p.ctx, target, task.start, task.want, task.total, p, remaining)
 }
 
 // fetchChunk downloads exactly want bytes at start. A compliant
@@ -381,22 +480,27 @@ func (c *Client) fetchChunk(
 	p *parallelPuller,
 	attempts int,
 ) chunkResult {
-	buf := takeBuffer(p.pool)
-	data := (*buf)[:0]
+	data := p.pool.take()
 	end := start + want - 1
+	parts := 0
 	for cursor := start; cursor <= end; {
+		if parts == maxParallelRangeParts {
+			p.pool.put(data)
+			return chunkResult{err: fmt.Errorf(
+				"fetching chunk bytes=%d-%d: registry split the range across more than %d partial responses",
+				start, end, maxParallelRangeParts)}
+		}
 		var next int64
 		var err error
 		data, next, err = c.fetchRangePart(ctx, target, cursor, end, total, data, p, attempts)
 		if err != nil {
-			*buf = data[:0]
-			p.pool.Put(buf)
-			return chunkResult{err: err, slot: true}
+			p.pool.put(data)
+			return chunkResult{err: err}
 		}
 		cursor = next
+		parts++
 	}
-	*buf = data
-	return chunkResult{buf: buf, data: data, slot: true}
+	return chunkResult{data: data}
 }
 
 // fetchRangePart fetches the interval beginning at start. It accepts
@@ -460,9 +564,17 @@ func (c *Client) fetchRangePartOnce(
 			err = ctxErr
 		}
 		return rangePartResult{
-			data: data, err: fmt.Errorf("fetching chunk %s: %w", rangeHeader, err), retryable: ctx.Err() == nil,
+			data: data, err: fmt.Errorf("fetching chunk %s: %w", rangeHeader, err),
+			retryable: ctx.Err() == nil && retryableRequestError(err),
 		}
 	}
+	body, tracked := p.trackBody(resp.Body)
+	if !tracked {
+		return rangePartResult{data: data, err: errParallelPullClosed}
+	}
+	resp.Body = body
+	defer p.untrackAndClose(body)
+
 	if resp.StatusCode != http.StatusPartialContent {
 		return unexpectedRangePart(resp, rangeHeader, data)
 	}
@@ -474,14 +586,9 @@ func (c *Client) fetchRangePartOnce(
 			"fetching chunk %s: registry returned invalid Content-Range %q",
 			rangeHeader, resp.Header.Get("Content-Range"))}
 	}
-	body, tracked := p.trackBody(resp.Body)
-	if !tracked {
-		return rangePartResult{data: data, err: errParallelPullClosed}
-	}
 	before := len(data)
 	partLength := parsed.end - parsed.start + 1
 	data, err = appendExactly(data, body, partLength)
-	p.untrackAndClose(body)
 	if err != nil {
 		return rangePartResult{
 			data: data[:before], err: fmt.Errorf("reading chunk %s: %w", rangeHeader, err), retryable: true,
@@ -511,46 +618,59 @@ func unexpectedRangePart(resp *http.Response, rangeHeader string, data []byte) r
 // readChunkInto reads exactly want bytes from r into a pooled buffer.
 // It grows according to bytes actually read rather than trusting a
 // potentially enormous configured chunk size up front.
-func readChunkInto(pool *sync.Pool, r io.Reader, want int64) (*[]byte, []byte, error) {
-	buf := takeBuffer(pool)
-	data, err := appendExactly((*buf)[:0], r, want)
+func readChunkInto(pool *chunkBufferPool, r io.Reader, want int64) ([]byte, error) {
+	data := pool.take()
+	data, err := appendExactly(data, r, want)
 	if err != nil {
-		*buf = data[:0]
-		pool.Put(buf)
-		return nil, nil, err
+		pool.put(data)
+		return nil, err
 	}
-	*buf = data
-	return buf, data, nil
-}
-
-// takeBuffer returns an empty pooled buffer, allocating only the
-// slice header when the pool has not retained one.
-func takeBuffer(pool *sync.Pool) *[]byte {
-	if buf, ok := pool.Get().(*[]byte); ok {
-		*buf = (*buf)[:0]
-		return buf
-	}
-	buf := make([]byte, 0)
-	return &buf
+	return data, nil
 }
 
 // appendExactly appends want bytes without converting an unchecked
-// int64 into a slice length or allocating the declared range at once.
+// int64 into a slice length or allocating the declared range at once. Each
+// read lands directly in dst's new tail, avoiding a per-response scratch copy.
 func appendExactly(dst []byte, r io.Reader, want int64) ([]byte, error) {
 	if want < 0 || uint64(want) > uint64(^uint(0)>>1)-uint64(len(dst)) {
 		return dst, fmt.Errorf("range length %d exceeds addressable memory", want)
 	}
-	scratch := make([]byte, min(want, parallelReadBufferSize))
-	for remaining := want; remaining > 0; {
-		step := min(remaining, int64(len(scratch)))
-		n, err := io.ReadFull(r, scratch[:int(step)])
-		dst = append(dst, scratch[:n]...)
-		remaining -= int64(n)
+	target := len(dst) + int(want)
+	for len(dst) < target {
+		step := min(target-len(dst), parallelReadBufferSize)
+		dst = growReadBuffer(dst, step, target)
+		start := len(dst)
+		dst = dst[:start+step]
+		n, err := io.ReadFull(r, dst[start:])
+		dst = dst[:start+n]
 		if err != nil {
 			return dst, err
 		}
 	}
 	return dst, nil
+}
+
+// growReadBuffer ensures additional writable bytes without growing beyond the
+// validated response size. Capacity expands geometrically from a small first
+// read so huge declared ranges do not trigger eager allocations.
+func growReadBuffer(dst []byte, additional, target int) []byte {
+	if cap(dst)-len(dst) >= additional {
+		return dst
+	}
+
+	needed := len(dst) + additional
+	next := max(cap(dst), parallelReadBufferSize)
+	next = min(next, target)
+	for next < needed {
+		if next > target/2 {
+			next = target
+			break
+		}
+		next *= 2
+	}
+	grown := make([]byte, len(dst), next)
+	copy(grown, dst)
+	return grown
 }
 
 // trackBody registers body for interruption by Close.
@@ -621,34 +741,67 @@ func (p *parallelPuller) readCurrent(b []byte) (int, bool, error) {
 	return 0, false, nil
 }
 
-// nextResult waits for the next ordered result while allowing
-// cancellation to win over an already-ready future.
+// nextResult reorders fixed-worker results while allowing cancellation to win
+// over an already-ready chunk.
 func (p *parallelPuller) nextResult() (chunkResult, error) {
-	var future chan chunkResult
-	select {
-	case next, ok := <-p.results:
-		if !ok {
-			return chunkResult{}, io.EOF
+	for {
+		if result, ok := p.takePending(); ok {
+			if ctxErr := p.ctx.Err(); ctxErr != nil {
+				p.releaseResult(result)
+				return chunkResult{}, ctxErr
+			}
+			return result, nil
 		}
-		future = next
-	case <-p.ctx.Done():
-		return chunkResult{}, p.ctx.Err()
-	}
-	if ctxErr := p.ctx.Err(); ctxErr != nil {
-		go func() { p.releaseResult(<-future) }()
-		return chunkResult{}, ctxErr
-	}
-	select {
-	case result := <-future:
-		if ctxErr := p.ctx.Err(); ctxErr != nil {
-			p.releaseResult(result)
-			return chunkResult{}, ctxErr
+
+		select {
+		case result, ok := <-p.results:
+			if !ok {
+				return chunkResult{}, io.EOF
+			}
+			if ctxErr := p.ctx.Err(); ctxErr != nil {
+				p.releaseResult(result)
+				return chunkResult{}, ctxErr
+			}
+			if p.resultIsNext(result) {
+				return result, nil
+			}
+			if !p.storePending(result) {
+				p.releaseResult(result)
+				return chunkResult{}, p.ctx.Err()
+			}
+		case <-p.ctx.Done():
+			return chunkResult{}, p.ctx.Err()
 		}
-		return result, nil
-	case <-p.ctx.Done():
-		go func() { p.releaseResult(<-future) }()
-		return chunkResult{}, p.ctx.Err()
 	}
+}
+
+// takePending removes the next ordered result when a worker completed it early.
+func (p *parallelPuller) takePending() (chunkResult, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result, ok := p.pending[p.next]
+	if ok {
+		delete(p.pending, p.next)
+	}
+	return result, ok
+}
+
+// resultIsNext reports whether result is ready for immediate ordered delivery.
+func (p *parallelPuller) resultIsNext(result chunkResult) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return result.index == p.next
+}
+
+// storePending retains an out-of-order result unless Close already won.
+func (p *parallelPuller) storePending(result chunkResult) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	p.pending[result.index] = result
+	return true
 }
 
 // adoptResult makes result the buffer served by the next Read.
@@ -661,8 +814,9 @@ func (p *parallelPuller) adoptResult(result chunkResult) error {
 	if ctxErr := p.ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
-	p.current, p.currentBuf = result.data, result.buf
+	p.current = result.data
 	p.currentSlot, p.pos = result.slot, 0
+	p.next++
 	return nil
 }
 
@@ -681,10 +835,18 @@ func (p *parallelPuller) Close() error {
 		for body := range p.active {
 			bodies = append(bodies, body)
 		}
+		pending := make([]chunkResult, 0, len(p.pending))
+		for _, result := range p.pending {
+			pending = append(pending, result)
+		}
+		clear(p.pending)
 		p.mu.Unlock()
 		p.cancel()
 		for _, body := range bodies {
 			_ = body.Close()
+		}
+		for _, result := range pending {
+			p.releaseResult(result)
 		}
 		go p.drainResults()
 	})
@@ -693,8 +855,8 @@ func (p *parallelPuller) Close() error {
 
 // drainResults releases results not consumed by a racing Read.
 func (p *parallelPuller) drainResults() {
-	for future := range p.results {
-		p.releaseResult(<-future)
+	for result := range p.results {
+		p.releaseResult(result)
 	}
 }
 
@@ -711,10 +873,7 @@ func (p *parallelPuller) terminalError(err error) error {
 
 // releaseResult recycles a result's buffer and concurrency token.
 func (p *parallelPuller) releaseResult(result chunkResult) {
-	if result.buf != nil {
-		*result.buf = (*result.buf)[:0]
-		p.pool.Put(result.buf)
-	}
+	p.pool.put(result.data)
 	if result.slot {
 		<-p.slots
 	}
@@ -722,13 +881,10 @@ func (p *parallelPuller) releaseResult(result chunkResult) {
 
 // releaseCurrentLocked recycles the current chunk. p.mu must be held.
 func (p *parallelPuller) releaseCurrentLocked() {
-	if p.currentBuf != nil {
-		*p.currentBuf = (*p.currentBuf)[:0]
-		p.pool.Put(p.currentBuf)
-	}
+	p.pool.put(p.current)
 	if p.currentSlot {
 		<-p.slots
 	}
-	p.currentBuf, p.current, p.pos = nil, nil, 0
+	p.current, p.pos = nil, 0
 	p.currentSlot = false
 }
