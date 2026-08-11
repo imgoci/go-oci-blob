@@ -159,3 +159,54 @@ func TestPullRangeE2E(t *testing.T) {
 		})
 	}
 }
+
+func TestPushE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/push"}
+			client := blob.New(blob.WithPlainHTTP(true))
+
+			data := bytes.Repeat([]byte("go-oci-blob e2e push round-trip "), 2048)
+			dgst := digest.FromBytes(data)
+
+			err := client.Push(t.Context(), repo, dgst, int64(len(data)), bytes.NewReader(data))
+			require.NoError(t, err)
+
+			exists, err := client.Exists(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			assert.True(t, exists, "pushed blob should exist")
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err, "reading to EOF verifies the digest")
+			require.NoError(t, rc.Close())
+			assert.Equal(t, data, got, "pushed bytes should pull back unchanged")
+		})
+	}
+}
+
+func TestMountE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			src := blob.Repository{Host: address, Name: "e2e/mount-src"}
+			dst := blob.Repository{Host: address, Name: "e2e/mount-dst"}
+			client := blob.New(blob.WithPlainHTTP(true))
+
+			data := []byte("go-oci-blob e2e mount blob")
+			dgst := digest.FromBytes(data)
+			require.NoError(t,
+				client.Push(t.Context(), src, dgst, int64(len(data)), bytes.NewReader(data)))
+
+			mounted, err := client.Mount(t.Context(), dst, src, dgst)
+			require.NoError(t, err)
+			assert.True(t, mounted, "registry should mount the blob across repositories")
+
+			exists, err := client.Exists(t.Context(), dst, dgst)
+			require.NoError(t, err)
+			assert.True(t, exists, "mounted blob should exist in the destination")
+		})
+	}
+}
