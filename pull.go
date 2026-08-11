@@ -22,7 +22,10 @@ import (
 // A stream that breaks mid-body resumes under the client's
 // [RetryPolicy] with a ranged request from the last delivered byte;
 // digest verification carries across the resume, so no byte is
-// hashed twice.
+// hashed twice. With [WithParallelPull] the blob arrives via
+// concurrent ranged fetches instead, emitted in order through the
+// same verifying reader, falling back to a single stream when the
+// registry does not serve ranges.
 //
 // Example:
 //
@@ -43,6 +46,14 @@ func (c *Client) Pull(
 	applyTransferOptions(opts)
 
 	target := blobURL(c.scheme(), repo, dgst)
+	if c.pullWorkers > 0 {
+		stream, err := c.parallelPull(ctx, target)
+		if err != nil {
+			return nil, fmt.Errorf("pulling blob %s from %s/%s: %w", dgst, repo.Host, repo.Name, err)
+		}
+		return newVerifyReader(stream, dgst), nil
+	}
+
 	resp, err := c.get(ctx, target, "") //nolint:bodyclose // verifying reader owns the body
 	if err != nil {
 		return nil, fmt.Errorf("pulling blob %s from %s/%s: %w", dgst, repo.Host, repo.Name, err)
