@@ -50,3 +50,23 @@ e2e_test.go now carries `//go:build e2e`; the -short skip is gone. Plain
 e2e (verified in the CI log: root:test-e2e completed, 11s). .golangci.yml
 gained run.build-tags [e2e] so the tagged file stays linted. Convention for
 later phases: all e2e tests go in e2e-tagged files.
+
+## 2026-08-10 21:25 — Phase 1 merged; Phase 2 implemented, PR #12 open
+PR #10 squash-merged (93dc58c); phase-1 worktree removed. Phase 2 in worktree
+`feat/phase2-pull`: verify.go (verifyReader hashes as bytes flow, swaps EOF
+for ErrDigestMismatch), pull.go (Pull → verifying ReadCloser; PullRange
+unverified per design, Range header, 206 pass-through, 200 ignored-range
+fallback carves the window via discard+LimitReader; shared c.get helper),
+transfer.go (empty TransferOption so signatures are final), ErrDigestMismatch
+sentinel, validateTarget refactor shared with Exists. Tests: verifyReader
+units (incl. iotest), scripted-transport integration (redirects abs+rel,
+garbage error bodies, 404→ErrNotFound, range paths), e2e pull + range
+round-trips green on registry:2 + zot with -race.
+PR: https://github.com/imgoci/go-oci-blob/pull/12 (CI in flight).
+
+Gotchas hit: (1) golangci-lint's shared cache replayed findings for the
+deleted phase-1 worktree path — the generated-file filter can't re-read the
+deleted file so previously-filtered mockery-mock findings leaked through with
+../feat-phase1-* paths; `golangci-lint cache clean` fixed it. (2) bodyclose
+flags Pull's escaping response body (verifying reader owns it) — narrow
+nolint with explanation. (3) Note: release-please holds PR #11.
