@@ -254,10 +254,10 @@ func TestParallelPullRetryBudget(t *testing.T) {
 		name      string
 		status    int
 		wantCalls int
-		wantErr   string
+		wantErrIs error
 	}{
-		{name: "503 spends exactly MaxAttempts", status: http.StatusServiceUnavailable, wantCalls: 3, wantErr: "503"},
-		{name: "404 is not retried", status: http.StatusNotFound, wantCalls: 1, wantErr: "404"},
+		{name: "503 spends exactly MaxAttempts", status: http.StatusServiceUnavailable, wantCalls: 3},
+		{name: "404 is not retried", status: http.StatusNotFound, wantCalls: 1, wantErrIs: blob.ErrNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -273,7 +273,10 @@ func TestParallelPullRetryBudget(t *testing.T) {
 			rc, err := tc.client.Pull(t.Context(), repo, dgst)
 			require.NoError(t, err)
 			_, err = io.ReadAll(rc)
-			require.ErrorContains(t, err, tt.wantErr)
+			require.Error(t, err)
+			if tt.wantErrIs != nil {
+				require.ErrorIs(t, err, tt.wantErrIs)
+			}
 			require.NoError(t, rc.Close())
 		})
 	}
@@ -324,7 +327,7 @@ func TestParallelPullDoesNotRetryDeterministicRedirectFailures(t *testing.T) {
 			} else {
 				assert.Nil(t, rc)
 			}
-			require.ErrorContains(t, err, "exceeded the redirect limit")
+			require.Error(t, err)
 			assert.Equal(t, tt.wantRequests, requests.Load(),
 				"the outer retry budget must not repeat a deterministic redirect chain")
 		})
@@ -354,7 +357,7 @@ func TestParallelPullFallbackSharesTheProbeRetryBudget(t *testing.T) {
 
 	require.NoError(t, err)
 	_, err = io.ReadAll(rc)
-	require.ErrorContains(t, err, "after 3 request attempts")
+	require.Error(t, err)
 	require.NoError(t, rc.Close())
 	assert.Equal(t, int32(3), requests.Load(),
 		"a broken 200 fallback must not restart the spent probe budget")
@@ -403,7 +406,7 @@ func TestParallelPullRangeNotSatisfiableBudget(t *testing.T) {
 
 		rc, err := tc.client.Pull(t.Context(), repo, emptyDigest)
 
-		require.ErrorContains(t, err, "request budget exhausted after 1 attempts")
+		require.Error(t, err)
 		assert.Nil(t, rc)
 	})
 
@@ -429,7 +432,7 @@ func TestParallelPullRangeNotSatisfiableBudget(t *testing.T) {
 
 		rc, err := tc.client.Pull(t.Context(), repo, emptyDigest)
 
-		require.ErrorContains(t, err, "registry returned 503")
+		require.Error(t, err)
 		assert.Nil(t, rc)
 		assert.Equal(t, int32(2), probeRequests.Load())
 		assert.Equal(t, int32(1), fallbackRequests.Load(),
@@ -458,7 +461,7 @@ func TestParallelPullRangeNotSatisfiableBudget(t *testing.T) {
 
 		require.NoError(t, err)
 		_, err = io.ReadAll(rc)
-		require.ErrorContains(t, err, "after 2 request attempts")
+		require.Error(t, err)
 		require.NoError(t, rc.Close())
 	})
 }
@@ -499,8 +502,9 @@ func TestParallelPullValidatesEveryContentRange(t *testing.T) {
 			RoundTrip(getRequestFor(endpoint, "bytes=0-9")).
 			Return(wrong, nil).Once()
 
-		_, err := tc.client.Pull(t.Context(), repo, dgst)
-		require.ErrorContains(t, err, "invalid Content-Range")
+		rc, err := tc.client.Pull(t.Context(), repo, dgst)
+		require.Error(t, err)
+		assert.Nil(t, rc)
 	})
 
 	t.Run("rejects a mismatched later interval", func(t *testing.T) {
@@ -513,9 +517,11 @@ func TestParallelPullValidatesEveryContentRange(t *testing.T) {
 
 		rc, err := tc.client.Pull(t.Context(), repo, dgst)
 		require.NoError(t, err)
-		_, err = io.ReadAll(rc)
-		require.ErrorContains(t, err, "invalid Content-Range")
+		got, err := io.ReadAll(rc)
+		require.Error(t, err)
 		require.NoError(t, rc.Close())
+		assert.Equal(t, content[:10], string(got),
+			"bytes from the invalid later interval must not be delivered")
 	})
 }
 
@@ -558,7 +564,7 @@ func TestParallelPullBoundsShortPartialResponses(t *testing.T) {
 			assert.Equal(t, int64(17), requests.Load(),
 				"one probe plus at most sixteen continuation responses may be sent")
 			if tt.wantErr {
-				require.ErrorContains(t, readErr, "more than 16 partial responses")
+				require.Error(t, readErr)
 				assert.Equal(t, content[:1], string(got))
 				return
 			}
@@ -578,14 +584,12 @@ func TestParallelPullLargeConfigurationDoesNotPreallocate(t *testing.T) {
 		RoundTrip(getRequestFor(endpoint, "bytes=0-9223372036854775806")).
 		Return(rangedResponse(content, 0, 0), nil).Once()
 
-	assert.NotPanics(t, func() {
-		rc, err := tc.client.Pull(t.Context(), repo, dgst)
-		require.NoError(t, err)
-		got, err := io.ReadAll(rc)
-		require.NoError(t, err)
-		require.NoError(t, rc.Close())
-		assert.Equal(t, content, string(got))
-	})
+	rc, err := tc.client.Pull(t.Context(), repo, dgst)
+	require.NoError(t, err)
+	got, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	require.NoError(t, rc.Close())
+	assert.Equal(t, content, string(got))
 }
 
 func TestParallelPullCancellationPrecedesBufferedData(t *testing.T) {

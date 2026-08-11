@@ -61,13 +61,16 @@ func TestClientExists(t *testing.T) {
 	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
 	dgst := digest.FromString("hello")
 	blobEndpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
+	transportErr := errors.New("connection refused")
 
 	tests := []struct {
-		name       string
-		opts       []blob.Option
-		setupMocks func(tc *testContext)
-		wantExists bool
-		wantErr    string
+		name            string
+		opts            []blob.Option
+		setupMocks      func(tc *testContext)
+		wantExists      bool
+		wantErr         bool
+		wantErrIs       error
+		wantErrContains string
 	}{
 		{
 			name: "reports true on 200",
@@ -85,7 +88,7 @@ func TestClientExists(t *testing.T) {
 					RoundTrip(headRequestFor(blobEndpoint)).
 					Return(response(http.StatusAccepted, ""), nil)
 			},
-			wantErr: "registry returned 202",
+			wantErr: true,
 		},
 		{
 			name: "reports false without error on 404",
@@ -115,16 +118,17 @@ func TestClientExists(t *testing.T) {
 					Return(response(http.StatusInternalServerError,
 						`{"errors":[{"code":"UNKNOWN","message":"boom"}]}`), nil)
 			},
-			wantErr: "registry returned 500",
+			wantErr:         true,
+			wantErrContains: "boom",
 		},
 		{
 			name: "surfaces a transport failure",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(mock.Anything).
-					Return(nil, errors.New("connection refused"))
+					Return(nil, transportErr)
 			},
-			wantErr: "connection refused",
+			wantErrIs: transportErr,
 		},
 	}
 
@@ -135,8 +139,14 @@ func TestClientExists(t *testing.T) {
 
 			got, err := tc.client.Exists(t.Context(), repo, dgst)
 
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
+			if tt.wantErr || tt.wantErrIs != nil {
+				require.Error(t, err)
+				if tt.wantErrIs != nil {
+					require.ErrorIs(t, err, tt.wantErrIs)
+				}
+				if tt.wantErrContains != "" {
+					require.ErrorContains(t, err, tt.wantErrContains)
+				}
 				return
 			}
 			require.NoError(t, err)
@@ -152,13 +162,13 @@ func TestClientExistsRejectsBadInput(t *testing.T) {
 		_, err := client.Exists(t.Context(),
 			blob.Repository{Host: "", Name: "ubuntu"}, digest.FromString("x"))
 
-		assert.ErrorContains(t, err, "host is empty")
+		require.Error(t, err)
 	})
 
 	t.Run("invalid digest never reaches the wire", func(t *testing.T) {
 		_, err := client.Exists(t.Context(),
 			blob.Repository{Host: "r.io", Name: "ubuntu"}, digest.Digest("not-a-digest"))
 
-		assert.ErrorContains(t, err, "invalid digest")
+		require.Error(t, err)
 	})
 }

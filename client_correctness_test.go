@@ -3,6 +3,7 @@ package blob_test
 import (
 	"io"
 	"math"
+	"net/http"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -12,46 +13,49 @@ import (
 	blob "github.com/imgoci/go-oci-blob"
 )
 
-func TestNewAcceptsNilOption(t *testing.T) {
-	assert.NotPanics(t, func() {
-		assert.NotNil(t, blob.New(nil))
-	})
+func TestNewIgnoresNilOption(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+	dgst := digest.FromString("nil option")
+	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
+	tc := newTestContext(t, nil)
+	tc.transport.EXPECT().
+		RoundTrip(headRequestFor(endpoint)).
+		Return(response(http.StatusOK, ""), nil).Once()
+
+	exists, err := tc.client.Exists(t.Context(), repo, dgst)
+
+	require.NoError(t, err)
+	assert.True(t, exists)
 }
 
-func TestWithParallelPullIgnoresOverflowingMemoryBound(t *testing.T) {
+func TestWithParallelPullIgnoresUnsafeConfiguration(t *testing.T) {
 	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
 	content := "single stream"
 	dgst := digest.FromString(content)
 	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
-	tc := newTestContext(t, blob.WithParallelPull(2, math.MaxInt64))
-	tc.transport.EXPECT().
-		RoundTrip(getRequestFor(endpoint, "")).
-		Return(sizedResponse(content), nil).Once()
 
-	rc, err := tc.client.Pull(t.Context(), repo, dgst)
-	require.NoError(t, err)
-	got, err := io.ReadAll(rc)
-	require.NoError(t, err)
-	require.NoError(t, rc.Close())
-	assert.Equal(t, content, string(got))
-}
+	tests := []struct {
+		name      string
+		workers   int
+		chunkSize int64
+	}{
+		{name: "overflowing memory bound", workers: 2, chunkSize: math.MaxInt64},
+		{name: "unallocatable worker count", workers: math.MaxInt, chunkSize: 1},
+	}
 
-func TestWithParallelPullIgnoresUnallocatableWorkerCount(t *testing.T) {
-	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
-	content := "single stream"
-	dgst := digest.FromString(content)
-	endpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + dgst.String()
-	tc := newTestContext(t, blob.WithParallelPull(math.MaxInt, 1))
-	tc.transport.EXPECT().
-		RoundTrip(getRequestFor(endpoint, "")).
-		Return(sizedResponse(content), nil).Once()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newTestContext(t, blob.WithParallelPull(tt.workers, tt.chunkSize))
+			tc.transport.EXPECT().
+				RoundTrip(getRequestFor(endpoint, "")).
+				Return(sizedResponse(content), nil).Once()
 
-	assert.NotPanics(t, func() {
-		rc, err := tc.client.Pull(t.Context(), repo, dgst)
-		require.NoError(t, err)
-		got, err := io.ReadAll(rc)
-		require.NoError(t, err)
-		require.NoError(t, rc.Close())
-		assert.Equal(t, content, string(got))
-	})
+			rc, err := tc.client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err)
+			require.NoError(t, rc.Close())
+			assert.Equal(t, content, string(got))
+		})
+	}
 }
