@@ -67,7 +67,8 @@ type Repository struct {
 
 func New(opts ...Option) *Client
 
-// Options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool)
+// Options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool),
+//          WithChunkedUpload(chunkSize int64), WithParallelPull(workers int, chunkSize int64)
 
 func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error)
 func (c *Client) Pull(ctx context.Context, repo Repository, dgst digest.Digest) (io.ReadCloser, error)
@@ -83,11 +84,14 @@ API decisions:
   `ErrDigestMismatch` instead of `io.EOF` when the hash does not match.
 - `Push` requires the digest and size up front. Registries need the digest to
   commit an upload, and the size picks the upload strategy. Callers that
-  stream unknown-size data can pass size `-1` to force chunked upload; whether
-  v1 supports this is an open question.
+  stream unknown-size data could pass size `-1`, which would only be valid
+  with `WithChunkedUpload` set; whether v1 supports this is an open question.
 - `Mount` returns `(false, nil)` when the registry declines the mount. The
   caller then decides whether to push. Mount-with-automatic-push-fallback can
   be layered on later if real use shows the need.
+- Defaults are the code paths every registry serves correctly: monolithic
+  upload and single-stream download. Chunked upload and parallel pull exist
+  behind toggles and are never chosen automatically.
 
 ## Wire behavior
 
@@ -113,9 +117,17 @@ Rules the client follows:
 - Parse the OCI error body (`{"errors": [...]}`) when present. When the body
   is not that shape, fall back to the status code. A malformed error body is
   never itself an error.
-- Prefer monolithic upload (single `PUT`). Fall back to chunked upload when
-  the registry rejects the monolithic form or the caller asks for it. Honor
-  `OCI-Chunk-Min-Length`.
+- Upload monolithically (single `PUT`) unless the caller sets
+  `WithChunkedUpload`. Chunked upload is spec-optional and broken on major
+  hosted registries (ECR discards chunks after the first and still returns
+  success; Docker Hub and GHCR have similar reports), because mainstream
+  clients never exercise it. It is an explicit opt-in, not a fallback.
+- In chunked mode, honor `OCI-Chunk-Min-Length` and verify the `Range` header
+  after every `PATCH`. If the acknowledged range does not advance by the
+  chunk just sent, abandon the session and fail the upload with a
+  descriptive error. The digest-verified commit `PUT` is the backstop: a
+  registry that dropped bytes fails the commit rather than storing a bad
+  blob.
 
 ## Reliability
 
@@ -128,15 +140,19 @@ Retry policy:
 - The caller's `context` bounds everything. A canceled context stops retries
   immediately.
 
-Resume rather than restart:
+Downloads resume; uploads restart:
 
 - Download: on a broken stream, issue a ranged `GET` from the last verified
-  byte. The digest state carries across the resume, so no bytes are hashed
-  twice.
-- Upload: on a broken chunked upload, ask the registry which bytes it holds
-  (`GET` on the upload URL, `Range` in the response) and continue from there.
-  This requires the caller-supplied reader to be re-readable or seekable;
-  when it is not, the upload restarts.
+  byte, gated on the registry serving ranges (`Accept-Ranges` or a `206`
+  response). The digest state carries across the resume, so no bytes are
+  hashed twice.
+- Upload: a failed upload restarts from byte zero. The spec defines session
+  resume (`GET` on the upload URL returns the received `Range`), but the
+  registries that break chunked upload break resume with it, and no
+  mainstream client exercises the path. It stays out until a consumer
+  demonstrates the need. Restarting requires the caller-supplied reader to
+  be re-readable or seekable; when it is not, the upload fails after the
+  first attempt.
 
 ## Errors
 
@@ -170,8 +186,19 @@ scripted-conversation suite is the largest of the three.
 - Copy loops reuse buffers from a `sync.Pool`.
 - Connection reuse and HTTP/2 come from the injected transport; the client
   never defeats them by closing bodies early or rebuilding clients.
-- Parallel ranged download (multiple `GET` ranges into a seekable sink) is
-  deferred until benchmarks show single-stream pull leaving bandwidth unused.
+
+Parallel pull is the library's one extra feature. It is off by default;
+`WithParallelPull(workers, chunkSize)` turns it on.
+
+- `Pull` keeps the same signature and still returns a verifying
+  `io.ReadCloser`. Workers fetch ranged `GET`s concurrently; the reader
+  emits chunks in order, so digest verification works unchanged.
+- Memory is bounded by `workers × chunkSize`. This is the one deliberate
+  exception to "never buffer", and the caller sets the bound.
+- If the registry does not serve ranges, `Pull` falls back to a single
+  stream. The toggle states intent, not a requirement.
+- A scatter-write variant (`io.WriterAt` sink) was rejected: it would add a
+  second pull API and break streaming verification for little gain.
 
 ## Open questions
 
