@@ -1,6 +1,9 @@
 package blob
 
-import "net/http"
+import (
+	"net/http"
+	"sync"
+)
 
 // Client transfers blobs to and from OCI registries. It is safe for
 // concurrent use. Create one with [New].
@@ -19,6 +22,14 @@ type Client struct {
 
 	// chunkSize enables chunked upload when positive.
 	chunkSize int64
+
+	// pullWorkers enables parallel pull when positive.
+	pullWorkers int
+	// pullChunk is the ranged-fetch size for parallel pull.
+	pullChunk int64
+	// bufPool recycles chunk buffers across parallel pulls; nil when
+	// parallel pull is off.
+	bufPool *sync.Pool
 }
 
 // Option configures a Client built by [New].
@@ -35,6 +46,10 @@ type options struct {
 	retry RetryPolicy
 	// chunkSize enables chunked upload when positive.
 	chunkSize int64
+	// pullWorkers enables parallel pull when positive.
+	pullWorkers int
+	// pullChunk is the ranged-fetch size for parallel pull.
+	pullChunk int64
 }
 
 // New builds a Client from the given options.
@@ -53,11 +68,41 @@ func New(opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Client{
-		httpClient: &http.Client{Transport: o.transport},
-		plainHTTP:  o.plainHTTP,
-		retry:      o.retry,
-		chunkSize:  o.chunkSize,
+	c := &Client{
+		httpClient:  &http.Client{Transport: o.transport},
+		plainHTTP:   o.plainHTTP,
+		retry:       o.retry,
+		chunkSize:   o.chunkSize,
+		pullWorkers: o.pullWorkers,
+		pullChunk:   o.pullChunk,
+	}
+	if c.pullWorkers > 0 {
+		c.bufPool = &sync.Pool{New: func() any {
+			buf := make([]byte, c.pullChunk)
+			return &buf
+		}}
+	}
+	return c
+}
+
+// WithParallelPull switches Pull to fetch blobs with workers
+// concurrent ranged requests of chunkSize bytes each. Values below
+// one for either parameter are ignored and leave single-stream pull
+// in place.
+//
+// Pull's contract does not change: chunks are emitted in order
+// through the same digest-verifying reader. Memory use is bounded by
+// roughly workers × chunkSize — the library's one deliberate
+// exception to never buffering — and the caller sets that bound with
+// these two parameters. When the registry does not serve ranges,
+// Pull quietly falls back to a single stream: the toggle states
+// intent, not a requirement.
+func WithParallelPull(workers int, chunkSize int64) Option {
+	return func(o *options) {
+		if workers > 0 && chunkSize > 0 {
+			o.pullWorkers = workers
+			o.pullChunk = chunkSize
+		}
 	}
 }
 

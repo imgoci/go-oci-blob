@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +102,26 @@ func parseErrorBody(body []byte) string {
 		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+// parseContentRangeTotal extracts the total blob size from a
+// Content-Range header of the form "bytes <start>-<end>/<total>".
+// A missing header, an unknown total ("*"), or any other shape
+// reports false.
+func parseContentRangeTotal(header string) (int64, bool) {
+	rest, found := strings.CutPrefix(header, "bytes ")
+	if !found {
+		return 0, false
+	}
+	_, totalText, found := strings.Cut(rest, "/")
+	if !found {
+		return 0, false
+	}
+	total, err := strconv.ParseInt(totalText, 10, 64)
+	if err != nil || total < 0 {
+		return 0, false
+	}
+	return total, true
 }
 
 // registryError is an error derived from a registry HTTP response.

@@ -187,6 +187,30 @@ func TestPushE2E(t *testing.T) {
 	}
 }
 
+func TestParallelPullE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/parallel"}
+			client := blob.New(
+				blob.WithPlainHTTP(true),
+				blob.WithParallelPull(4, 128<<10),
+			)
+
+			data := bytes.Repeat([]byte("parallel pull e2e"), 65_000) // ~1.1 MiB → 9 chunks
+			dgst := digest.FromBytes(data)
+			seedBlob(t, address, repo.Name, dgst, data)
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err, "reading to EOF verifies the digest")
+			require.NoError(t, rc.Close())
+			assert.Equal(t, data, got, "parallel pull should reassemble the blob in order")
+		})
+	}
+}
+
 func TestChunkedPushE2E(t *testing.T) {
 	for _, reg := range e2eRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
