@@ -187,6 +187,32 @@ func TestPushE2E(t *testing.T) {
 	}
 }
 
+func TestChunkedPushE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/chunked"}
+			client := blob.New(
+				blob.WithPlainHTTP(true),
+				blob.WithChunkedUpload(64<<10),
+			)
+
+			data := bytes.Repeat([]byte("chunked e2e"), 15_000) // ~165 KiB → 3 chunks
+			dgst := digest.FromBytes(data)
+
+			err := client.Push(t.Context(), repo, dgst, int64(len(data)), bytes.NewReader(data))
+			require.NoError(t, err)
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err, "reading to EOF verifies the digest")
+			require.NoError(t, rc.Close())
+			assert.Equal(t, data, got, "chunked-pushed bytes should pull back unchanged")
+		})
+	}
+}
+
 func TestMountE2E(t *testing.T) {
 	for _, reg := range e2eRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
