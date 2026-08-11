@@ -124,3 +124,21 @@ zero-size blob; e2e chunked 165KiB/64KiB-chunks push+pull green on both
 registries (both implement chunked correctly). Lint gotcha: canonicalheader
 wants Oci-Chunk-Min-Length spelling (Go canonicalizes; wire-equivalent).
 PR: https://github.com/imgoci/go-oci-blob/pull/15 (CI in flight).
+
+## 2026-08-10 22:42 — Phase 5 merged; Phase 6 implemented, PR #16 open
+PR #15 squash-merged (395712c). Phase 6 in worktree `feat/phase6-parallel`:
+WithParallelPull(workers, chunkSize); parallel.go with ordered-futures
+pipeline (results chan cap=workers + slots semaphore → memory ≈ workers×
+chunk; client-level sync.Pool buffers). Probe design: first chunk's ranged
+GET doubles as probe — 206 gives total via Content-Range (parse helper in
+wire.go), 200 IS the fallback single stream (no wasted request), 416 (empty
+blob) → plain GET fallback. Per-chunk body-break refetch under policy;
+non-206 mid-download = explicit error; Close cancels dispatcher and drains
+futures (workers always send into buffered futures — key to no deadlock).
+Benchmarks (M4 Max loopback, 16MiB): single 2.17GiB/s, 4×1MiB 2.38GiB/s,
+8×1MiB 2.05GiB/s — loopback is CPU-bound so parity is the honest result;
+recorded in PR. Test gotcha worth remembering: an unexpected mockery call
+inside a worker goroutine runs t.FailNow → runtime.Goexit → the worker's
+future never fills → Close drain deadlocks; script prospective chunk
+requests with .Maybe() in failure-path tests.
+PR: https://github.com/imgoci/go-oci-blob/pull/16 (CI in flight).
