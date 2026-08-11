@@ -176,3 +176,69 @@ func TestTransportOptionsIgnoreTypedNilValues(t *testing.T) {
 	assert.Same(t, registryDefault, opts.transport)
 	assert.Same(t, storageDefault, opts.storageTransport)
 }
+
+// TestNewSizesOnlyOwnedDefaultTransportsForParallelPull verifies that tuning
+// the library default neither mutates the process-wide transport nor replaces
+// either caller-owned transport.
+func TestNewSizesOnlyOwnedDefaultTransportsForParallelPull(t *testing.T) {
+	const workers = 8
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	require.True(t, ok, "net/http's default transport must be cloneable")
+	originalMaxIdle := defaultTransport.MaxIdleConns
+	originalMaxIdlePerHost := defaultTransport.MaxIdleConnsPerHost
+
+	client := New(WithParallelPull(workers, 1))
+	scoped, ok := client.httpClient.Transport.(*scopedTransport)
+	require.True(t, ok)
+	registryTransport, ok := scoped.registry.(*http.Transport)
+	require.True(t, ok)
+	storageTransport, ok := scoped.storage.(*http.Transport)
+	require.True(t, ok)
+
+	assert.Same(t, registryTransport, storageTransport,
+		"the two default routes should share one connection pool")
+	assert.NotSame(t, defaultTransport, registryTransport)
+	assert.GreaterOrEqual(t, registryTransport.MaxIdleConns, workers)
+	assert.GreaterOrEqual(t, registryTransport.MaxIdleConnsPerHost, workers)
+	assert.Equal(t, originalMaxIdle, defaultTransport.MaxIdleConns,
+		"constructing a parallel client must not mutate http.DefaultTransport")
+	assert.Equal(t, originalMaxIdlePerHost, defaultTransport.MaxIdleConnsPerHost,
+		"constructing a parallel client must not mutate http.DefaultTransport")
+
+	registryCustom := mocks.NewRoundTripper(t)
+	storageCustom := mocks.NewRoundTripper(t)
+	customClient := New(
+		WithParallelPull(workers, 1),
+		WithTransport(registryCustom),
+		WithStorageTransport(storageCustom),
+	)
+	customScoped, ok := customClient.httpClient.Transport.(*scopedTransport)
+	require.True(t, ok)
+	assert.Same(t, registryCustom, customScoped.registry)
+	assert.Same(t, storageCustom, customScoped.storage)
+}
+
+// TestNewTunesEachUnconfiguredTransportIndependently verifies that one custom
+// route does not prevent the other default route from receiving a suitable
+// connection pool.
+func TestNewTunesEachUnconfiguredTransportIndependently(t *testing.T) {
+	const workers = 8
+	registryCustom := mocks.NewRoundTripper(t)
+	storageCustom := mocks.NewRoundTripper(t)
+
+	registryClient := New(WithParallelPull(workers, 1), WithTransport(registryCustom))
+	registryScoped, ok := registryClient.httpClient.Transport.(*scopedTransport)
+	require.True(t, ok)
+	assert.Same(t, registryCustom, registryScoped.registry)
+	storageDefault, ok := registryScoped.storage.(*http.Transport)
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, storageDefault.MaxIdleConnsPerHost, workers)
+
+	storageClient := New(WithParallelPull(workers, 1), WithStorageTransport(storageCustom))
+	storageScoped, ok := storageClient.httpClient.Transport.(*scopedTransport)
+	require.True(t, ok)
+	assert.Same(t, storageCustom, storageScoped.storage)
+	registryDefault, ok := storageScoped.registry.(*http.Transport)
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, registryDefault.MaxIdleConnsPerHost, workers)
+}
