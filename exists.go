@@ -22,11 +22,8 @@ import (
 //		Name: "library/ubuntu",
 //	}, dgst)
 func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error) {
-	if err := repo.Validate(); err != nil {
+	if err := validateTarget(repo, dgst); err != nil {
 		return false, err
-	}
-	if err := dgst.Validate(); err != nil {
-		return false, fmt.Errorf("invalid digest %q: %w", dgst, err)
 	}
 
 	u := blobURL(c.scheme(), repo, dgst)

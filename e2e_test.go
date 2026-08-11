@@ -9,6 +9,7 @@ package blob_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -108,6 +109,53 @@ func TestExistsE2E(t *testing.T) {
 			missing, err := client.Exists(t.Context(), repo, digest.FromString("not there"))
 			require.NoError(t, err)
 			assert.False(t, missing, "unseeded digest should not exist")
+		})
+	}
+}
+
+func TestPullE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/pull"}
+			client := blob.New(blob.WithPlainHTTP(true))
+
+			data := bytes.Repeat([]byte("go-oci-blob e2e pull round-trip "), 1024)
+			dgst := digest.FromBytes(data)
+			seedBlob(t, address, repo.Name, dgst, data)
+
+			rc, err := client.Pull(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err, "reading to EOF verifies the digest")
+			require.NoError(t, rc.Close())
+			assert.Equal(t, data, got, "pulled bytes should round-trip")
+
+			_, err = client.Pull(t.Context(), repo, digest.FromString("not there"))
+			require.ErrorIs(t, err, blob.ErrNotFound)
+		})
+	}
+}
+
+func TestPullRangeE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/pullrange"}
+			client := blob.New(blob.WithPlainHTTP(true))
+
+			data := bytes.Repeat([]byte("0123456789"), 100)
+			dgst := digest.FromBytes(data)
+			seedBlob(t, address, repo.Name, dgst, data)
+
+			const offset, length = 250, 500
+			rc, err := client.PullRange(t.Context(), repo, dgst, offset, length)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			require.NoError(t, err)
+			require.NoError(t, rc.Close())
+			assert.Equal(t, data[offset:offset+length], got,
+				"ranged pull should serve exactly the requested window")
 		})
 	}
 }
