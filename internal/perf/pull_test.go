@@ -1,4 +1,4 @@
-package blob_test
+package perf_test
 
 import (
 	"bytes"
@@ -86,6 +86,7 @@ func benchmarkPullConcurrent(
 	})
 }
 
+// BenchmarkPull measures verified single-stream and parallel pull paths.
 func BenchmarkPull(b *testing.B) {
 	data := bytes.Repeat([]byte("benchmarking blob transfer bytes"), 1<<19) // 16 MiB
 	dgst := digest.FromBytes(data)

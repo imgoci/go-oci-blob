@@ -1,4 +1,4 @@
-package blob_test
+package perf_test
 
 import (
 	"bytes"
@@ -88,6 +88,7 @@ func benchmarkPush(
 	}
 }
 
+// BenchmarkPush measures monolithic, chunked, and concurrent small uploads.
 func BenchmarkPush(b *testing.B) {
 	data := bytes.Repeat([]byte("upload-benchmark"),
 		pushBenchmarkSize/len("upload-benchmark")+1)[:pushBenchmarkSize]

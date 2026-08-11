@@ -1,4 +1,4 @@
-package blob_test
+package perf_test
 
 import (
 	"bytes"
