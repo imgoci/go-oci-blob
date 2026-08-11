@@ -49,3 +49,6 @@ Pending: PR #8 CI, then merge; obsolete dependabot PRs (goreleaser-action, docke
 
 ## 2026-08-10 20:15 — Repository settings applied
 User made the repo public (rulesets + Pages need public on free plan; first apply attempt 403'd on rulesets while private). Ran .github/scripts/configure_github_repo.py apply --repo imgoci/go-oci-blob from the chore/library-shape worktree (updated TOML): general settings, immutable releases, private vuln reporting, automated security fixes, Pages (workflow build, HTTPS, https://imgoci.github.io/go-oci-blob/), and both managed rulesets created. Re-plan converges: no supported changes required. Remaining items are GitHub-UI-only toggles the script lists as manual follow-ups (Archive Program, dependency submission, malware alerts, etc.).
+
+## 2026-08-10 20:20 — PR #8 merged
+Squash-merged chore/library-shape (master b60c246); main checkout fast-forwarded; worktree removed. Closed obsolete dependabot PRs #1 (goreleaser-action), #2 (attest), #3 (docker/login-action) — their workflows were deleted. PRs #4-6 (setup-go, mise-action, mkdocs-material) remain valid for review. Master CI + Pages deploy running post-merge. Repo reshape is complete: design doc merged, library-only layout, settings applied, release creds set, public visibility, Pages live at https://imgoci.github.io/go-oci-blob/ once deploy finishes.
