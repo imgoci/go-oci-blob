@@ -1,16 +1,15 @@
 ---
-title: template-go Docs
+title: go-oci-blob
 slug: /
-description: Starting point for Meigma Go projects.
+description: Go library for uploading and downloading OCI blobs.
 ---
 
-# template-go Docs
+# go-oci-blob
 
-This repository is the starting point for Meigma Go projects.
+go-oci-blob is a Go library that uploads and downloads OCI blobs. It covers
+the blob subset of the OCI distribution spec and nothing else: push, pull,
+existence checks, and cross-repository mounts, with retries and digest
+verification built in.
 
-Generated projects should replace this page with project-specific documentation after bootstrapping:
-
-- project summary
-- quick start
-- operating notes
-- support and security paths
+The library is pre-release. The [design](explanation/design.md) page records
+the architecture and API direction.
