@@ -65,6 +65,7 @@ func benchmarkPullConcurrent(
 	b.SetBytes(size)
 	b.ReportAllocs()
 	ctx := b.Context()
+	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			rc, err := client.Pull(ctx, repo, dgst)

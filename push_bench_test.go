@@ -113,13 +113,16 @@ func BenchmarkPush(b *testing.B) {
 		client := blob.New(blob.WithPlainHTTP(true))
 		b.SetBytes(smallSize)
 		b.ReportAllocs()
+		ctx := b.Context()
+		b.ResetTimer()
 
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				err := client.Push(
-					b.Context(), repo, smallDigest, smallSize, bytes.NewReader(smallData))
+					ctx, repo, smallDigest, smallSize, bytes.NewReader(smallData))
 				if err != nil {
-					b.Fatal(err)
+					b.Error(err)
+					return
 				}
 			}
 		})
