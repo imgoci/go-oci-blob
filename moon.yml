@@ -67,12 +67,22 @@ tasks:
     options:
       cache: false
 
+  # End-to-end tests are build-tagged out of the plain test task; they
+  # need a running Docker daemon for testcontainers.
+  test-e2e:
+    command: 'go test -tags e2e ./...'
+    inputs:
+      - '@group(goSources)'
+    options:
+      cache: false
+
   check:
     deps:
       - 'root:format'
       - 'root:lint'
       - 'root:build'
       - 'root:test'
+      - 'root:test-e2e'
       - 'docs:build'
     inputs:
       - '@group(goSources)'

@@ -1,0 +1,113 @@
+//go:build e2e
+
+package blob_test
+
+// End-to-end tests against real registries via testcontainers. They
+// need a running Docker daemon and only build with the e2e tag:
+// `go test -tags e2e ./...`.
+
+import (
+	"bytes"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"testing"
+
+	"github.com/opencontainers/go-digest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+
+	blob "github.com/imgoci/go-oci-blob"
+)
+
+// e2eRegistries lists the registry images every e2e test runs against.
+// Both are OCI-conformant, multi-arch, and serve the distribution API
+// on port 5000 with their stock configuration.
+func e2eRegistries() []struct{ name, image string } {
+	return []struct{ name, image string }{
+		{name: "registry", image: "registry:2"},
+		{name: "zot", image: "ghcr.io/project-zot/zot:v2.1.20"},
+	}
+}
+
+// startRegistry launches a registry container and returns its
+// host:port address, cleaned up with the test.
+func startRegistry(t *testing.T, image string) string {
+	t.Helper()
+	ctx := t.Context()
+
+	container, err := testcontainers.Run(ctx, image,
+		testcontainers.WithExposedPorts("5000/tcp"),
+		testcontainers.WithWaitStrategy(
+			wait.ForHTTP("/v2/").WithPort("5000/tcp").
+				WithStatusCodeMatcher(func(status int) bool { return status == http.StatusOK }),
+		),
+	)
+	testcontainers.CleanupContainer(t, container)
+	require.NoError(t, err, "starting %s container", image)
+
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
+	port, err := container.MappedPort(ctx, "5000")
+	require.NoError(t, err)
+
+	return net.JoinHostPort(host, port.Port())
+}
+
+// seedBlob uploads data into the registry with a raw monolithic
+// POST+PUT so tests can exercise read paths before Push exists.
+func seedBlob(t *testing.T, registry, name string, dgst digest.Digest, data []byte) {
+	t.Helper()
+	ctx := t.Context()
+
+	postURL := fmt.Sprintf("http://%s/v2/%s/blobs/uploads/", registry, name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, postURL, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, "starting upload session")
+
+	base, err := url.Parse(postURL)
+	require.NoError(t, err)
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	require.NoError(t, err, "parsing upload Location %q", resp.Header.Get("Location"))
+	putURL := base.ResolveReference(loc)
+	query := putURL.Query()
+	query.Set("digest", dgst.String())
+	putURL.RawQuery = query.Encode()
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodPut, putURL.String(), bytes.NewReader(data))
+	require.NoError(t, err)
+	req.ContentLength = int64(len(data))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "committing upload")
+}
+
+func TestExistsE2E(t *testing.T) {
+	for _, reg := range e2eRegistries() {
+		t.Run(reg.name, func(t *testing.T) {
+			address := startRegistry(t, reg.image)
+			repo := blob.Repository{Host: address, Name: "e2e/exists"}
+			client := blob.New(blob.WithPlainHTTP(true))
+
+			data := []byte("go-oci-blob e2e test blob")
+			dgst := digest.FromBytes(data)
+			seedBlob(t, address, repo.Name, dgst, data)
+
+			exists, err := client.Exists(t.Context(), repo, dgst)
+			require.NoError(t, err)
+			assert.True(t, exists, "seeded blob should exist")
+
+			missing, err := client.Exists(t.Context(), repo, digest.FromString("not there"))
+			require.NoError(t, err)
+			assert.False(t, missing, "unseeded digest should not exist")
+		})
+	}
+}

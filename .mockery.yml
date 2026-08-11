@@ -1,0 +1,15 @@
+# Mockery v3 configuration (T2/T3): every mock is generated, never
+# hand-written. The transport port (net/http.RoundTripper) is the one
+# seam the client depends on, so it is the one mock.
+#
+# Regenerate with: mise exec -- mockery
+template: testify
+packages:
+  net/http:
+    config:
+      dir: mocks
+      pkgname: mocks
+      filename: round_tripper.go
+      structname: RoundTripper
+    interfaces:
+      RoundTripper:

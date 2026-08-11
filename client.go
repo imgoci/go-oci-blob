@@ -1,0 +1,79 @@
+package blob
+
+import "net/http"
+
+// Client transfers blobs to and from OCI registries. It is safe for
+// concurrent use. Create one with [New].
+type Client struct {
+	// httpClient executes registry requests and follows redirects to
+	// blob storage (S3, CDN). Go's http.Client strips Authorization on
+	// cross-host redirects; the design depends on that, so registry
+	// credentials never reach a storage host.
+	httpClient *http.Client
+
+	// plainHTTP selects http:// instead of https:// for registry URLs.
+	plainHTTP bool
+}
+
+// Option configures a Client built by [New].
+type Option func(*options)
+
+// options collects the settings applied by New before the Client is
+// assembled.
+type options struct {
+	// transport is the caller-injected port for all registry I/O.
+	transport http.RoundTripper
+	// plainHTTP selects http:// registry URLs.
+	plainHTTP bool
+}
+
+// New builds a Client from the given options.
+//
+// With no options the Client uses [http.DefaultTransport] and speaks
+// https. Authentication is the caller's job: inject a transport that
+// attaches credentials with [WithTransport].
+//
+// Example:
+//
+//	client := blob.New(blob.WithTransport(authTransport))
+//	ok, err := client.Exists(ctx, repo, dgst)
+func New(opts ...Option) *Client {
+	o := options{transport: http.DefaultTransport, plainHTTP: false}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return &Client{
+		httpClient: &http.Client{Transport: o.transport},
+		plainHTTP:  o.plainHTTP,
+	}
+}
+
+// WithTransport sets the [http.RoundTripper] used for every registry
+// request. This is the seam where authentication is injected: pass an
+// authenticated transport from a library such as oras-go or
+// go-containerregistry. A nil transport selects
+// [http.DefaultTransport].
+func WithTransport(rt http.RoundTripper) Option {
+	return func(o *options) {
+		if rt != nil {
+			o.transport = rt
+		}
+	}
+}
+
+// WithPlainHTTP selects plain http:// registry URLs instead of https.
+// Meant for local registries served without TLS; leave it off for
+// anything reachable from the internet.
+func WithPlainHTTP(plain bool) Option {
+	return func(o *options) {
+		o.plainHTTP = plain
+	}
+}
+
+// scheme returns the URL scheme the Client addresses registries with.
+func (c *Client) scheme() string {
+	if c.plainHTTP {
+		return "http"
+	}
+	return "https"
+}

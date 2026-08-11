@@ -12,6 +12,12 @@
 
 version: "2"
 
+run:
+  # Lint the build-tagged e2e tests too; without this they are invisible
+  # to every linter.
+  build-tags:
+    - e2e
+
 issues:
   # Maximum count of issues with the same text.
   # Set to 0 to disable.
