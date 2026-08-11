@@ -46,3 +46,6 @@ Merged PR #7 (design doc) via squash. Then followed DELETE_ME.md's library-only 
 - moon run root:check passes; mise.lock + docs/uv.lock regenerated; rg shows zero template-go/meigma refs left.
 - .claude/skills is a symlink to .agents/skills in the main checkout, so deleted skills disappear on merge automatically.
 Pending: PR #8 CI, then merge; obsolete dependabot PRs (goreleaser-action, docker/login-action, attest) should auto-close after merge; apply repository settings; release app must be installed on imgoci/go-oci-blob for release-please to work.
+
+## 2026-08-10 20:15 — Repository settings applied
+User made the repo public (rulesets + Pages need public on free plan; first apply attempt 403'd on rulesets while private). Ran .github/scripts/configure_github_repo.py apply --repo imgoci/go-oci-blob from the chore/library-shape worktree (updated TOML): general settings, immutable releases, private vuln reporting, automated security fixes, Pages (workflow build, HTTPS, https://imgoci.github.io/go-oci-blob/), and both managed rulesets created. Re-plan converges: no supported changes required. Remaining items are GitHub-UI-only toggles the script lists as manual follow-ups (Archive Program, dependency submission, malware alerts, etc.).
