@@ -30,3 +30,8 @@ Proposed doc changes (awaiting user): (1) demote upload resume to opportunistic 
 User decisions: (1) chunked upload stays but as an explicit toggle (WithChunkedUpload), never a fallback; default remains monolithic PUT. (2) Parallel ranged pull is promoted to the library's one built-in extra, behind WithParallelPull(workers, chunkSize), default single stream.
 Doc updated on PR #7 (commit b0adb56): defaults-are-universal-paths principle added to API decisions; chunked mode verifies Range ack after every PATCH and fails on non-advancing ack; upload session resume cut from v1 (uploads restart from zero, needs re-readable reader); parallel pull keeps the Pull signature, emits in order through the verifying reader, memory bounded by workers×chunkSize, falls back to single stream without range support; scatter-write WriterAt variant explicitly rejected; size -1 push open question now tied to chunked toggle.
 Next: user review of PR #7.
+
+## 2026-08-10 19:40 — Open questions resolved
+User rulings: no size -1 (Push size mandatory, callers spool if unknown); PullRange is in (trivial, real value); progress callbacks are in (guaranteed first feature request, consumers need visibility).
+Doc updated (commit 0b51490): PullRange added to API sketch as unverified ranged read (digest covers whole blob, partial body can't be checked; Pull remains the verified path); progress as per-call TransferOption WithProgress(fn(done, total)) with committed-progress semantics — rationale recorded that caller-side reader wrapping double-counts on upload restart; parallel pull reports one aggregated count. Open questions section removed; all questions resolved into the body.
+Design doc is now decision-complete. Next: user approval/merge of PR #7, then implementation planning.
