@@ -24,6 +24,7 @@ import (
 // registry that drops chunks does so deterministically.
 func (c *Client) chunkedOnce(
 	ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader,
+	tracker *progressTracker,
 ) (bool, error) {
 	session, retryable, err := c.openSession(ctx, repo)
 	if err != nil {
@@ -39,6 +40,8 @@ func (c *Client) chunkedOnce(
 			return retryable, err
 		}
 		offset += n
+		// The ack verified this chunk, so its bytes are committed.
+		tracker.set(offset)
 	}
 	return c.commitUpload(ctx, session.url, dgst, 0, http.NoBody)
 }

@@ -53,13 +53,15 @@ type parallelPuller struct {
 // first chunk synchronously and falls back to a plain stream when
 // the registry does not serve ranges (200 probe answer, or 416 for
 // an empty blob).
-func (c *Client) parallelPull(ctx context.Context, target *url.URL) (io.ReadCloser, error) {
+func (c *Client) parallelPull(
+	ctx context.Context, target *url.URL, tracker *progressTracker,
+) (io.ReadCloser, error) {
 	probe, err := c.get(ctx, target, fmt.Sprintf("bytes=0-%d", c.pullChunk-1)) //nolint:bodyclose // reader owns body
 	if err != nil {
 		var regErr *registryError
 		if errors.As(err, &regErr) && regErr.status == http.StatusRequestedRangeNotSatisfiable {
 			// An empty blob satisfies no range; fetch it plainly.
-			return c.singleStream(ctx, target)
+			return c.singleStream(ctx, target, tracker)
 		}
 		return nil, err
 	}
@@ -67,41 +69,53 @@ func (c *Client) parallelPull(ctx context.Context, target *url.URL) (io.ReadClos
 	if probe.StatusCode != http.StatusPartialContent {
 		// The registry ignored the range: this response already is
 		// the whole blob, so use it as the single-stream fallback.
-		return &resumeReader{ctx: ctx, client: c, target: target, body: probe.Body}, nil
+		tracker.setTotal(probe.ContentLength)
+		stream := &resumeReader{ctx: ctx, client: c, target: target, body: probe.Body}
+		return progressify(stream, tracker), nil
 	}
 	total, ok := parseContentRangeTotal(probe.Header.Get("Content-Range"))
 	if !ok {
 		// Range support without a usable total; a plain stream is
 		// the only safe plan.
 		drainAndClose(probe.Body)
-		return c.singleStream(ctx, target)
+		return c.singleStream(ctx, target, tracker)
 	}
 
+	tracker.setTotal(total)
 	pullCtx, cancel := context.WithCancel(ctx)
 	puller := &parallelPuller{
 		cancel:  cancel,
 		results: make(chan chan chunkResult, c.pullWorkers),
 		pool:    c.bufPool,
 	}
-	go puller.dispatch(pullCtx, c, target, total, probe.Body)
+	go puller.dispatch(pullCtx, c, target, total, probe.Body, tracker)
 	return puller, nil
 }
 
 // singleStream opens a plain full-blob GET wrapped in the usual
-// resume layer.
-func (c *Client) singleStream(ctx context.Context, target *url.URL) (io.ReadCloser, error) {
+// resume layer, reporting delivered bytes to the tracker.
+func (c *Client) singleStream(
+	ctx context.Context, target *url.URL, tracker *progressTracker,
+) (io.ReadCloser, error) {
 	resp, err := c.get(ctx, target, "") //nolint:bodyclose // the returned reader owns the body
 	if err != nil {
 		return nil, err
 	}
-	return &resumeReader{ctx: ctx, client: c, target: target, body: resp.Body}, nil
+	tracker.setTotal(resp.ContentLength)
+	stream := &resumeReader{ctx: ctx, client: c, target: target, body: resp.Body}
+	return progressify(stream, tracker), nil
 }
 
 // dispatch schedules every chunk fetch, keeping at most one worker
 // per concurrency slot and enqueueing futures in chunk order.
 // probeBody is the already-open response for chunk zero.
 func (p *parallelPuller) dispatch(
-	ctx context.Context, c *Client, target *url.URL, total int64, probeBody io.ReadCloser,
+	ctx context.Context,
+	c *Client,
+	target *url.URL,
+	total int64,
+	probeBody io.ReadCloser,
+	tracker *progressTracker,
 ) {
 	defer close(p.results)
 
@@ -117,9 +131,10 @@ func (p *parallelPuller) dispatch(
 		_ = probeBody.Close()
 		if err != nil {
 			// The probe body broke; refetch chunk zero whole.
-			first <- c.fetchChunk(ctx, target, 0, want, p.pool)
+			first <- c.fetchChunk(ctx, target, 0, want, p.pool, tracker)
 			return
 		}
+		tracker.add(want)
 		first <- chunkResult{buf: buf, data: data}
 	}()
 	select {
@@ -140,7 +155,7 @@ func (p *parallelPuller) dispatch(
 		future := make(chan chunkResult, 1)
 		go func() {
 			defer func() { <-slots }()
-			future <- c.fetchChunk(ctx, target, start, want, p.pool)
+			future <- c.fetchChunk(ctx, target, start, want, p.pool, tracker)
 		}()
 		select {
 		case p.results <- future:
@@ -151,15 +166,20 @@ func (p *parallelPuller) dispatch(
 }
 
 // fetchChunk downloads the want bytes at start with a ranged GET,
-// retrying broken chunk bodies under the client's policy.
+// retrying broken chunk bodies under the client's policy. A fetched
+// chunk counts toward aggregated progress exactly once.
 func (c *Client) fetchChunk(
-	ctx context.Context, target *url.URL, start, want int64, pool *sync.Pool,
+	ctx context.Context, target *url.URL, start, want int64, pool *sync.Pool, tracker *progressTracker,
 ) chunkResult {
 	rangeHeader := fmt.Sprintf("bytes=%d-%d", start, start+want-1)
 	attempts := c.retry.attempts()
 	for attempt := 1; ; attempt++ {
 		result := c.fetchChunkOnce(ctx, target, rangeHeader, want, pool)
-		if result.err == nil || ctx.Err() != nil || attempt == attempts {
+		if result.err == nil {
+			tracker.add(want)
+			return result
+		}
+		if ctx.Err() != nil || attempt == attempts {
 			return result
 		}
 		if err := sleepContext(ctx, c.retry.backoffDelay(attempt, 0)); err != nil {

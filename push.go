@@ -52,7 +52,8 @@ func (c *Client) Push(
 	if r == nil {
 		return errors.New("nil reader")
 	}
-	applyTransferOptions(opts)
+	cfg := applyTransferOptions(opts)
+	tracker := newProgressTracker(cfg.progress, size)
 
 	uploadOnce := c.pushOnce
 	if c.chunkSize > 0 {
@@ -62,7 +63,7 @@ func (c *Client) Push(
 	rewind := rewinder(r)
 	attempts := c.retry.attempts()
 	for attempt := 1; ; attempt++ {
-		retryable, err := uploadOnce(ctx, repo, dgst, size, r)
+		retryable, err := uploadOnce(ctx, repo, dgst, size, r, tracker)
 		if err == nil {
 			return nil
 		}
@@ -89,12 +90,15 @@ func (c *Client) Push(
 // is not.
 func (c *Client) pushOnce(
 	ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader,
+	tracker *progressTracker,
 ) (bool, error) {
 	session, retryable, err := c.openSession(ctx, repo)
 	if err != nil {
 		return retryable, err
 	}
-	return c.commitUpload(ctx, session.url, dgst, size, r)
+	// Wrap per attempt so the position restarts at zero with the
+	// reader; the tracker suppresses already-committed positions.
+	return c.commitUpload(ctx, session.url, dgst, size, &countingReader{r: r, tracker: tracker})
 }
 
 // uploadSession is an open blob upload session on a registry.
