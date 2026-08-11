@@ -1,7 +1,10 @@
+//go:build e2e
+
 package blob_test
 
 // End-to-end tests against real registries via testcontainers. They
-// need a running Docker daemon and skip under `go test -short`.
+// need a running Docker daemon and only build with the e2e tag:
+// `go test -tags e2e ./...`.
 
 import (
 	"bytes"
@@ -88,10 +91,6 @@ func seedBlob(t *testing.T, registry, name string, dgst digest.Digest, data []by
 }
 
 func TestExistsE2E(t *testing.T) {
-	if testing.Short() {
-		t.Skip("e2e tests need Docker; skipped under -short")
-	}
-
 	for _, reg := range e2eRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
