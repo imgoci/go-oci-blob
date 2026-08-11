@@ -1,0 +1,182 @@
+# Design
+
+go-oci-blob is a Go library that uploads and downloads OCI blobs. That is the
+whole library. This page records the design before implementation and the
+reasoning behind it.
+
+## Scope
+
+In scope:
+
+- Upload (push) a blob to an OCI registry.
+- Download (pull) a blob from an OCI registry.
+- Check that a blob exists.
+- Cross-repository blob mount, with fallback to a normal push.
+- Retries, resume, and digest verification for all of the above.
+
+Out of scope:
+
+- Manifests, tags, referrers, and the rest of the OCI distribution spec.
+- Authentication. The caller injects an authenticated `http.RoundTripper`.
+  Libraries such as `oras-go` and `go-containerregistry` already provide them.
+- Signatures, attestations, and image tooling of any kind.
+
+Every line of code must serve blob transfer. When a feature request falls
+outside that sentence, the answer is no.
+
+## Dependencies
+
+The runtime dependency list is the Go standard library plus
+`github.com/opencontainers/go-digest`.
+
+`go-digest` is included for interoperability, not function. The libraries that
+callers pair with this one already use `digest.Digest`, so our API accepts it
+directly. The alternative was a local `~50` line digest type; it would work but
+would force every caller to convert strings at the boundary.
+
+Test-only dependencies (mockery, testify, testcontainers) do not ship to
+consumers.
+
+## Architecture
+
+The library follows the repository's hexagonal rules (A1). The split:
+
+- **Core (pure logic, no I/O):** request planning, response interpretation,
+  retry decisions, chunking, and digest bookkeeping. This code runs and tests
+  without a network.
+- **Port:** a single interface over one HTTP round trip. `http.RoundTripper`
+  already has the right shape, so the port is the caller-injected transport.
+  This one seam covers both testing and authentication.
+- **Adapter:** `net/http` with a small wrapper that executes a planned request
+  and hands the response back to the core.
+
+The public surface is one package, `blob`. Internal helpers move to `internal/`
+packages when a file nears the 1,000-line cap (R2), not before.
+
+## Public API sketch
+
+Shapes below are a starting point, not a contract. Expect them to change as
+prototypes land.
+
+```go
+// Repository addresses a blob store: a registry host plus a repository name.
+type Repository struct {
+    Host string // "registry.example.com" or "localhost:5000"
+    Name string // "library/ubuntu"
+}
+
+func New(opts ...Option) *Client
+
+// Options: WithTransport(http.RoundTripper), WithRetryPolicy(...), WithPlainHTTP(bool)
+
+func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error)
+func (c *Client) Pull(ctx context.Context, repo Repository, dgst digest.Digest) (io.ReadCloser, error)
+func (c *Client) Push(ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader) error
+func (c *Client) Mount(ctx context.Context, dst, src Repository, dgst digest.Digest) (bool, error)
+```
+
+API decisions:
+
+- `Pull` returns an `io.ReadCloser` instead of writing to an `io.Writer`. A
+  reader composes with more caller code and never buffers the blob (P2). The
+  reader verifies the digest as bytes flow; the final `Read` returns
+  `ErrDigestMismatch` instead of `io.EOF` when the hash does not match.
+- `Push` requires the digest and size up front. Registries need the digest to
+  commit an upload, and the size picks the upload strategy. Callers that
+  stream unknown-size data can pass size `-1` to force chunked upload; whether
+  v1 supports this is an open question.
+- `Mount` returns `(false, nil)` when the registry declines the mount. The
+  caller then decides whether to push. Mount-with-automatic-push-fallback can
+  be layered on later if real use shows the need.
+
+## Wire behavior
+
+The blob subset of the distribution spec is five request shapes:
+
+| Operation | Request |
+|---|---|
+| Existence | `HEAD /v2/<name>/blobs/<digest>` |
+| Pull | `GET /v2/<name>/blobs/<digest>` |
+| Start upload / mount | `POST /v2/<name>/blobs/uploads/` |
+| Chunked upload | `PATCH <location>` with `Content-Range` |
+| Commit upload | `PUT <location>?digest=<digest>` |
+
+Rules the client follows:
+
+- React to status-code families, not exact codes. A registry that returns
+  `200` where the spec says `201` still succeeded.
+- Resolve `Location` headers as relative or absolute URLs. Registries return
+  both.
+- Follow redirects to blob storage (S3, CDN). Go's `http.Client` strips
+  `Authorization` on cross-host redirects. That is correct here and the design
+  depends on it: registry credentials must not reach a CDN host.
+- Parse the OCI error body (`{"errors": [...]}`) when present. When the body
+  is not that shape, fall back to the status code. A malformed error body is
+  never itself an error.
+- Prefer monolithic upload (single `PUT`). Fall back to chunked upload when
+  the registry rejects the monolithic form or the caller asks for it. Honor
+  `OCI-Chunk-Min-Length`.
+
+## Reliability
+
+Retry policy:
+
+- Retry on connection errors, request timeouts, `429`, and `5xx`. Do not
+  retry other `4xx`; the request is wrong, not unlucky.
+- Exponential backoff with full jitter. Honor `Retry-After` when the registry
+  sends it, capped by the policy's maximum delay.
+- The caller's `context` bounds everything. A canceled context stops retries
+  immediately.
+
+Resume rather than restart:
+
+- Download: on a broken stream, issue a ranged `GET` from the last verified
+  byte. The digest state carries across the resume, so no bytes are hashed
+  twice.
+- Upload: on a broken chunked upload, ask the registry which bytes it holds
+  (`GET` on the upload URL, `Range` in the response) and continue from there.
+  This requires the caller-supplied reader to be re-readable or seekable;
+  when it is not, the upload restarts.
+
+## Errors
+
+Sentinel errors (E1), kept few and high-level:
+
+- `ErrNotFound`: the blob or repository does not exist.
+- `ErrDigestMismatch`: bytes did not hash to the expected digest.
+
+Everything else wraps the underlying HTTP or network error with enough context
+to debug. New sentinels are added when a caller demonstrates a need to branch
+on the condition, not before.
+
+## Testing
+
+Three layers (T1):
+
+1. Unit tests on the pure core: response interpretation, retry decisions,
+   range math, digest bookkeeping.
+2. Integration tests with a mockery-generated transport mock, driving the
+   client against scripted registry conversations, including the misbehaving
+   ones.
+3. End-to-end tests with testcontainers against real registries. Start with
+   `registry:2` and `zot`; both are OCI-conformant and run cheaply in CI.
+
+The tolerance rules in "Wire behavior" are the heart of the library, so the
+scripted-conversation suite is the largest of the three.
+
+## Performance
+
+- Stream everything. No code path holds a whole blob in memory (P2).
+- Copy loops reuse buffers from a `sync.Pool`.
+- Connection reuse and HTTP/2 come from the injected transport; the client
+  never defeats them by closing bodies early or rebuilding clients.
+- Parallel ranged download (multiple `GET` ranges into a seekable sink) is
+  deferred until benchmarks show single-stream pull leaving bandwidth unused.
+
+## Open questions
+
+- Does v1 accept size `-1` on `Push` for unknown-length streams?
+- Should `Pull` also offer a ranged variant (`PullRange`) for callers that
+  want partial blobs?
+- Is a progress callback worth its API surface, or do callers wrap the
+  reader themselves?
