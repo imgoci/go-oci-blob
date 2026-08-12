@@ -39,3 +39,15 @@ Final classifications: No functional data-integrity, retry, streaming, shared-cl
 Cleanup and proof: A fresh `git archive` diff against the temporary source was empty; the source has zero user-writable files; the real checkout is still clean at the same commit and tree. All current-run Registry 2, Zot, TLS registry, and Ryuk containers were removed. The only Docker resources left are one unrelated running GitHub MCP container and two unrelated stale Aug 8 resources that predated the campaign. No uniquely named GHCR functional package remains. Harness/evidence checksums are in `/tmp/go-oci-blob-functional.quDtZu/evidence/SHA256SUMS`; the resource report is `resource-lane.md`.
 
 Next: Deliver the final manual functional-test verdict. No test harness or library change will be merged.
+
+## 2026-08-12 10:04 — Progress callback contract fix published
+
+Decision: Fix the functional campaign's one actionable contract finding by clarifying the API rather than imposing global callback serialization. `WithProgress` now states that callbacks do not overlap within one transfer, while concurrent transfers may invoke a reused callback at the same time and therefore require caller-side synchronization of shared state. The design explanation carries the same boundary.
+
+Test change: Made the public progress recorder race-safe and added a common assertion that callback invocations observed within each tested transfer do not overlap. Kept the test at the public API boundary; an implementation-coupled tracker concurrency test had intentionally been removed in PR #23. Did not add a test requiring cross-transfer overlap because the clarified contract permits overlap without promising it.
+
+Verification: Focused progress tests passed 20 normal repetitions and five race repetitions. The full build, unit suite, race suite, fresh-cache golangci-lint format/lint checks, strict MkDocs build, and tagged Registry 2/Zot E2E suite all passed. The initial lint invocation read stale cache paths from a deleted sibling worktree; rerunning with an isolated fresh cache passed cleanly.
+
+Published: Commit `2d238b6` (`fix: clarify progress callback concurrency contract`) on `feat/progress-callback-contract`; PR #24: https://github.com/imgoci/go-oci-blob/pull/24.
+
+Next: Await review and hosted checks. Do not merge or close session 005 without explicit user direction.
