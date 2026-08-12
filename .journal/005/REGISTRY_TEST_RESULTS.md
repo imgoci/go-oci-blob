@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry |
-|---|---|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS |
-| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS |
-| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry | Harbor |
+|---|---|---|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS |
+| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A |
+| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -412,3 +412,65 @@ Preflight found one unrelated resource group named `Lab`, zero ACR instances, an
 | Final normal ACR matrix | `0812e1e5f580de8c0df699bcf309bf3290109bab38ccb6920efa7c3bd3b83b78` |
 | Final race ACR matrix | `0812e1e5f580de8c0df699bcf309bf3290109bab38ccb6920efa7c3bd3b83b78` |
 | Disposable ACR matrix harness | `bc9ece8a3b0b5a491eca8f7700110077f8b403b8197b8c9ebef6d983117e3b6d` |
+
+## Harbor
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Harbor | `v2.15.2`, official online installer |
+| Registry host | `harbor.localtest.me:9443` |
+| Deployment | Disposable local Docker Compose; filesystem storage; private source and destination projects |
+| Platform | Harbor `linux/amd64` images under Docker emulation on a `linux/arm64` host |
+| Credential model | Disposable local Harbor admin credential over a campaign-only CA |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 256 KiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | Library default, except a bounded 4-attempt resume probe |
+| Operation timeout | 30 seconds per operation; 10 minutes per campaign |
+| Source project | `blob-ft-wag3ib-source` |
+| Destination project | `blob-ft-wag3ib-dest` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | The campaign-only CA verified Harbor's TLS certificate. Anonymous `/v2/` returned a `401` Bearer challenge, and scoped tokens obtained with the disposable credential authenticated data-plane requests. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent authenticated GET returned all exact bytes. |
+| `Exists` | PASS | A present digest returned true and a synthetic missing digest returned false without an error. |
+| Serial `Pull` | PASS | An ORAS-seeded 4 MiB layer reached verified EOF with exact bytes and an independent SHA-256 match. |
+| Progress reporting | PASS | Parallel Pull callbacks were monotonic and non-overlapping and ended at `4,194,304 / 4,194,304`; each final run observed 38 callbacks. |
+| `PullRange` | PASS | A 333,777-byte middle window returned exact bytes through Harbor's native range support. |
+| Parallel `Pull` | PASS | Sixteen successful `206` requests returned exact ordered bytes. All four configured response bodies overlapped, and zero remained active after completion. |
+| Parallel range-ignored fallback | N/A | Harbor served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected mid-body failure resumed with a ranged continuation and returned exact final bytes and digest. |
+| Unreferenced blob retrieval | PASS, observed | A completed library Push was independently retrievable before any manifest referenced it. |
+| Monolithic `Push` | PASS | The default path used exactly one body-bearing final PUT and no PATCH; an independent GET returned exact bytes. |
+| Empty blob | PASS | Harbor accepted the canonical zero-byte blob; `Exists` and independent GET both verified it. |
+| Chunked `Push` | PASS | A 3,145,839-byte upload used four acknowledged PATCH requests and an empty final `PUT 201`; independent retrieval returned exact bytes. |
+| Wrong digest | PASS | Push failed, neither the claimed nor calculated digest became available, and an upload-session cleanup DELETE was observed. |
+| Exact reader size | PASS | Both short and trailing reader declarations failed, and the claimed digest remained absent. |
+| Cross-repository `Mount` | PASS | The destination was absent first; exactly one mount POST returned `201`; raw GET and an independent ORAS fetch returned exact destination bytes. |
+| Shared-client concurrency | PASS | Twenty barrier-started Pull, PullRange, Exists, Push, and Mount operations completed. All eight pushed or mounted artifacts passed independent exact-byte GETs, and the race detector reported no race. |
+| Redirect credential scope | N/A | Filesystem-backed Harbor emitted no off-origin redirect, so the credential-stripping path was not exercised. |
+| Upload `Location` | PASS | Successful operations followed Harbor's same-origin absolute opaque upload locations. |
+| Throttling retry | N/A | The bounded local campaign produced no `429` response. |
+
+### Verification and cleanup
+
+The normal and race campaigns produced identical matrices: 17 PASS, three N/A, and zero NO, BLOCKED, or FAIL rows. The normal test completed in 25.64 seconds; the race test completed in 26.17 seconds with no race report. ORAS independently seeded the source layer and later fetched the mounted destination from both fresh normal and race repository paths with exact bytes.
+
+Harbor ran as nine healthy `v2.15.2` service containers. Cleanup stopped and removed the exact Compose deployment and network, removed both private projects with the disposable filesystem data, deleted all campaign TLS, credentials, source export, fixtures, harness, logs, and evidence, and confirmed port 9443 was closed. The unrelated pre-existing GitHub MCP container was not touched. The main checkout remained clean at the tested commit.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Final normal Harbor matrix | `0e891541b792c5ff62d597d7382cc765f79cbcfcd0716c4885af7b5e279dcb8d` |
+| Final race Harbor matrix | `0e891541b792c5ff62d597d7382cc765f79cbcfcd0716c4885af7b5e279dcb8d` |
+| Disposable Harbor matrix harness | `4d3191d3509de833b7d33b81a72acd10c3b7cc6988c68bfb78ac93419cac0263` |
+| Harbor core image | `sha256:06396e2c823b582ae3da9b8d471bd250e4934d10b864f6c627546707af32cefc` |

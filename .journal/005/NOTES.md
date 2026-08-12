@@ -161,3 +161,15 @@ Protocol observations: Nine native ranged `206` responses returned exact paralle
 Cleanup: Confirmed the disposable resource group contained exactly the tagged ACR, deleted the whole group, and verified the subscription returned to zero ACR instances. Restored `Microsoft.ContainerRegistry` to its original unregistered state. Removed the scoped registry admin credential, harness, source export, and evidence. The unrelated `Lab` group and the clean main checkout were untouched.
 
 Next: Commit and push only the journal results, then await the next registry candidate.
+
+## 2026-08-12 16:26 — Harbor compatibility campaign
+
+Target and isolation: Deployed the official Harbor `v2.15.2` online-installer stack locally with a campaign-only CA, filesystem storage, and private source and destination projects. Harbor's `linux/amd64` service images ran under Docker emulation on the `linux/arm64` host. The consumer used a read-only export of commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`; no library source changed.
+
+Authoritative result: Fresh normal and race repository paths each produced 17 PASS and three N/A rows with identical matrices. HTTPS/Bearer authentication, small blobs, present/missing Exists, serial Pull, progress, PullRange, native parallel Pull, interrupted-stream resume, unreferenced retrieval, monolithic Push, empty-blob Push/Pull, 1 MiB-configured chunked Push, wrong-digest and exact-size safety, cross-repository Mount, shared-client concurrency, and absolute upload Locations passed. Range-ignored fallback, off-origin credential scope, and throttling remained N/A because local Harbor served native ranges, used filesystem storage without redirects, and did not emit `429`.
+
+Protocol and concurrency proof: ORAS independently seeded a 4 MiB source layer. Parallel Pull used sixteen `206` requests with all four configured response bodies active and none remaining afterward. A forced body break resumed through a range request. The 3,145,839-byte chunked upload used four acknowledged PATCHes and an empty final `PUT 201`. Wrong-digest rejection left both possible digests absent and attempted cleanup. Mount returned `201`; raw HTTP and ORAS independently verified the destination. Twenty barrier-started mixed operations created eight artifacts, all independently fetched exactly; the race detector reported no race.
+
+Cleanup: Stopped and removed the exact nine-container Harbor Compose deployment and its network, then removed the private projects, filesystem data, TLS material, credential, immutable export, harness, fixtures, logs, and evidence. Confirmed port 9443 was closed and no Harbor campaign container or network remained. The unrelated GitHub MCP container stayed running, and the main checkout remained clean.
+
+Next: Commit and push only the Harbor journal results, then continue with the next local OSS registry candidate.
