@@ -99,11 +99,14 @@ API decisions:
   on partial reads build it above the library.
 - Byte-moving calls take `WithProgress(fn)`. The callback receives cumulative
   bytes moved and the total (`-1` when unknown), runs synchronously on the
-  transfer path, and must return quickly. Pull reports bytes delivered to the
-  caller. Monolithic Push reports after the final `201`; chunked Push advances
-  after each PATCH acknowledgement, so only a nil Push error proves the final
-  commit succeeded. A caller-side wrapper cannot report these consistently
-  across transparent retries and parallel workers.
+  transfer path, and must return quickly. Calls do not overlap within one
+  transfer, including a parallel Pull. Concurrent transfers may call the same
+  function at the same time, so callers must protect callback state shared
+  across transfers. Pull reports bytes delivered to the caller. Monolithic Push
+  reports after the final `201`; chunked Push advances after each PATCH
+  acknowledgement, so only a nil Push error proves the final commit succeeded.
+  A caller-side wrapper cannot report these consistently across transparent
+  retries and parallel workers.
 - `Mount` returns `(false, nil)` when the registry declines the mount. The
   caller then decides whether to push. Mount-with-automatic-push-fallback can
   be layered on later if real use shows the need.
