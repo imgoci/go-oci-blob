@@ -149,3 +149,15 @@ Protocol observations: Nine native ranged `206` responses returned exact paralle
 Cleanup: Deleted both uniquely named public repositories and verified the account repository list returned to zero. Deleted the disposable robot and verified the account reported no robot accounts. The main worktree remained clean. Recorded the authoritative results and hashes in the dedicated registry results ledger, then removed the disposable credentials, harness, source export, and evidence.
 
 Next: Commit and push only the journal results, then await the next registry candidate.
+
+## 2026-08-12 15:06 — Azure Container Registry compatibility campaign
+
+Target and isolation: Used the user's temporary Microsoft device login against the `Pay-As-You-Go` subscription, then switched data-plane work to a temporary admin credential scoped to one disposable Basic ACR. Preflight found the unrelated `Lab` resource group, zero existing ACR instances, and the `Microsoft.ContainerRegistry` provider unregistered. Registered the provider temporarily, created a uniquely tagged resource group containing exactly one registry in `westus2`, and left `Lab` untouched. Tested from an external consumer against a read-only export of commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`; no library source changed.
+
+Authoritative result: Final normal and race campaigns each produced 18 PASS and two N/A rows. HTTPS/admin-bearer authentication, small blobs, present/missing Exists, serial Pull, progress, PullRange, native parallel Pull, interrupted-stream resume, unreferenced retrieval, monolithic Push, empty-blob Push/Pull, 1 MiB-configured chunked Push, wrong-digest and exact-size safety, cross-repository Mount, shared-client mixed concurrency, off-origin credential isolation, and mixed absolute/relative upload Locations passed. The race detector reported no race.
+
+Protocol observations: Nine native ranged `206` responses returned exact parallel bytes with three response bodies overlapping and none remaining active. A forced break after 128 KiB resumed through ranges. A 3,146,061-byte chunked upload used four PATCH requests and returned exact bytes. Cross-repository Mount succeeded and the destination returned exact bytes. Sixty-two off-origin requests carried no registry authorization. ACR was the second tested hosted registry after Docker Hub to correctly serve the canonical empty blob; ORAS independently fetched both the exact 2,097,289-byte control and exact zero-byte blob.
+
+Cleanup: Confirmed the disposable resource group contained exactly the tagged ACR, deleted the whole group, and verified the subscription returned to zero ACR instances. Restored `Microsoft.ContainerRegistry` to its original unregistered state. Removed the scoped registry admin credential, harness, source export, and evidence. The unrelated `Lab` group and the clean main checkout were untouched.
+
+Next: Commit and push only the journal results, then await the next registry candidate.

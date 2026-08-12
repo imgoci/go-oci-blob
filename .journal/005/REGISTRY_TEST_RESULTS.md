@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io |
-|---|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO |
-| Chunked `Push` | NO | PASS | PASS | NO | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS |
-| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry |
+|---|---|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS |
+| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS |
+| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -350,3 +350,65 @@ Both uniquely named public repositories were deleted and the account repository 
 | Final normal Quay matrix | `85e221dccc9cf7bef6ba62e3e303bee2f606524d5c6c64fa1513f0f5f5e0a46e` |
 | Final race Quay matrix | `1d48ebe090f359e6186456c59f39c432c1d4d919ce89315c8f97730af160efa3` |
 | Disposable Quay matrix harness | `3c6d8fdc36a7c0dc18491ff437177ec50f05a70ce28a0dab0fa463dccb3bab8a` |
+
+## Azure Container Registry
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Subscription | `Pay-As-You-Go` (`cf14054f-1892-4519-a74c-8e1a086b4764`) |
+| Tenant | `1de2c188-1b00-4f6e-8343-cb43f983d4b4` |
+| Region | `westus2` |
+| Registry | `goociblobft220000.azurecr.io` |
+| SKU | Basic |
+| Credential model | Temporary registry admin credential scoped to the disposable ACR |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 256 KiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | 4 attempts, 100 ms initial delay, 2 s maximum delay |
+| Campaign timeout | 12 minutes |
+| Source namespace | `go-oci-blob-ft-20260812t220000z-source` |
+| Destination namespace | `go-oci-blob-ft-20260812t220000z-dest` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | Unauthenticated `/v2/` returned `401`; a caller-supplied bearer flow backed by the temporary ACR admin credential returned `200` over HTTPS. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent authenticated GET returned exact bytes. |
+| `Exists` | PASS | A present digest returned true and a fresh missing digest returned false without errors. |
+| Serial `Pull` | PASS | The full 2,097,289-byte body reached verified EOF with exact bytes and digest. Independent ORAS retrieval matched its size and SHA-256. |
+| Progress reporting | PASS | Counts were monotonic, ended at the exact total, and did not overlap within the transfer. |
+| `PullRange` | PASS | Beginning, middle, and tail windows were exact through native `206` responses. A past-end request was rejected. |
+| Parallel `Pull` | PASS | Nine ranged `206` responses returned exact ordered bytes. Three response bodies overlapped in the final runs and none remained active. |
+| Parallel range-ignored fallback | N/A | ACR served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected body break after 128 KiB resumed through ranged requests and returned exact bytes. |
+| Unreferenced blob retrieval | PASS, observed | Before any manifest existed, raw GET and independent ORAS blob fetch returned the exact completed 2,097,289-byte blob and digest. |
+| Monolithic `Push` | PASS | The default path used a body-bearing final PUT with no PATCH, and independent retrieval returned exact bytes. |
+| Empty blob | PASS | ACR accepted the zero-byte Push; `Exists`, raw GET, library Pull, and independent ORAS fetch all returned the exact empty blob. |
+| Chunked `Push` | PASS | A 3,146,061-byte upload used four 1 MiB-configured PATCH requests and completed successfully; independent raw retrieval returned exact bytes. |
+| Wrong digest | PASS | The upload failed, neither the claimed nor calculated digest became available, and the library attempted session cleanup. |
+| Exact reader size | PASS | Both short and trailing reader declarations failed, and the digest remained absent. |
+| Cross-repository `Mount` | PASS | ACR returned a successful mount and the destination passed an independent exact-byte GET. |
+| Shared-client concurrency | PASS | Twenty concurrent Pull, PullRange, Exists, Push, and Mount operations completed without errors. The mounted result passed an independent exact-byte GET, and the race detector reported no race. |
+| Redirect credential scope | PASS | The campaign observed 62 off-origin storage requests. No registry authorization header crossed origins. |
+| Upload `Location` | PASS | Successful operations followed both absolute and relative opaque upload locations. The final campaign observed 62 absolute and 30 relative responses. |
+| Throttling retry | N/A | No safe deterministic hosted throttling trigger was used and no controlled `429` response was produced. |
+
+### Verification and cleanup
+
+The final normal and `GOMAXPROCS=8` race campaigns each produced 18 PASS and two N/A rows. The normal test completed in 8.77 seconds; the race test completed in 8.08 seconds with no race report. ORAS independently fetched and hash-verified the 2,097,289-byte main blob and separately fetched the exact zero-byte blob.
+
+Preflight found one unrelated resource group named `Lab`, zero ACR instances, and the `Microsoft.ContainerRegistry` provider in `NotRegistered` state. The campaign created a uniquely tagged resource group containing exactly one Basic ACR and left `Lab` untouched. Cleanup deleted the whole disposable resource group, confirmed the subscription again had zero ACR instances, and restored the provider to `Unregistered`. The immutable source export had zero user-writable files and the main checkout remained clean.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Final normal ACR matrix | `0812e1e5f580de8c0df699bcf309bf3290109bab38ccb6920efa7c3bd3b83b78` |
+| Final race ACR matrix | `0812e1e5f580de8c0df699bcf309bf3290109bab38ccb6920efa7c3bd3b83b78` |
+| Disposable ACR matrix harness | `bc9ece8a3b0b5a491eca8f7700110077f8b403b8197b8c9ebef6d983117e3b6d` |
