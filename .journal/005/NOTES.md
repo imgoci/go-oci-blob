@@ -51,3 +51,7 @@ Verification: Focused progress tests passed 20 normal repetitions and five race 
 Published: Commit `2d238b6` (`fix: clarify progress callback concurrency contract`) on `feat/progress-callback-contract`; PR #24: https://github.com/imgoci/go-oci-blob/pull/24.
 
 Next: Await review and hosted checks. Do not merge or close session 005 without explicit user direction.
+
+## 2026-08-12 10:05 — Hosted checks green
+
+PR #24 passed CI, both Go and Actions CodeQL analyses, and the GitHub Pages validation. The PR remains open and unmerged for user review.
