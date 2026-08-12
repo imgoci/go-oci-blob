@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry | Harbor |
-|---|---|---|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS |
-| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A |
-| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry | Harbor | GitLab native registry |
+|---|---|---|---|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS | PASS |
+| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A | N/A |
+| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -474,3 +474,66 @@ Harbor ran as nine healthy `v2.15.2` service containers. Cleanup stopped and rem
 | Final race Harbor matrix | `0e891541b792c5ff62d597d7382cc765f79cbcfcd0716c4885af7b5e279dcb8d` |
 | Disposable Harbor matrix harness | `4d3191d3509de833b7d33b81a72acd10c3b7cc6988c68bfb78ac93419cac0263` |
 | Harbor core image | `sha256:06396e2c823b582ae3da9b8d471bd250e4934d10b864f6c627546707af32cefc` |
+
+## GitLab native container registry
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| GitLab | Community Edition `19.2.1`, revision `f4d029d2da8` |
+| Registry host | `registry.gitlab.localtest.me:5055` |
+| Token realm | `https://gitlab.localtest.me:9444/jwt/auth` |
+| Deployment | Disposable official GitLab Docker image with the bundled registry, filesystem storage, and two private projects |
+| Platform | Native `linux/arm64` image on a `linux/arm64` Docker host |
+| Credential model | Disposable root personal access token with API and registry scopes; revoked after cleanup |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 256 KiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | Library default, except a bounded 4-attempt resume probe |
+| Operation timeout | 30 seconds per operation; 10 minutes per campaign |
+| Source project | `root/blob-ft-gitlab-source` |
+| Destination project | `root/blob-ft-gitlab-dest` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | The campaign CA verified distinct GitLab and registry TLS endpoints. Anonymous `/v2/` returned GitLab's `container_registry` Bearer challenge, and scoped tokens from `/jwt/auth` authenticated data-plane requests. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent authenticated GET returned all exact bytes. |
+| `Exists` | PASS | A present digest returned true and a synthetic missing digest returned false without an error. |
+| Serial `Pull` | PASS | An ORAS-seeded 4 MiB OCI layer reached verified EOF with exact bytes and an independent SHA-256 match. |
+| Progress reporting | PASS | Parallel Pull callbacks were monotonic and non-overlapping and ended at `4,194,304 / 4,194,304`; each final run observed 38 callbacks. |
+| `PullRange` | PASS | A 333,777-byte middle window returned exact bytes through GitLab's native range support. |
+| Parallel `Pull` | PASS | Sixteen successful `206` requests returned exact ordered bytes. All four configured response bodies overlapped, and zero remained active after completion. |
+| Parallel range-ignored fallback | N/A | GitLab served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected mid-body failure resumed with a ranged continuation and returned exact final bytes and digest. |
+| Unreferenced blob retrieval | PASS, observed | A completed library Push was independently retrievable before any manifest referenced it. |
+| Monolithic `Push` | PASS | The default path used exactly one body-bearing final PUT and no PATCH; an independent GET returned exact bytes. |
+| Empty blob | PASS | GitLab accepted the canonical zero-byte blob; `Exists` and independent GET both verified it. |
+| Chunked `Push` | PASS | A 3,145,839-byte upload used four acknowledged PATCH requests and an empty final `PUT 201`; independent retrieval returned exact bytes. |
+| Wrong digest | PASS | Push failed, neither the claimed nor calculated digest became available, and an upload-session cleanup DELETE was observed. |
+| Exact reader size | PASS | Both short and trailing reader declarations failed, and the claimed digest remained absent. |
+| Cross-repository `Mount` | PASS | The destination was absent first; exactly one mount POST returned `201`; raw GET and independent ORAS fetches returned exact destination bytes. |
+| Shared-client concurrency | PASS | Twenty barrier-started Pull, PullRange, Exists, Push, and Mount operations completed. All eight pushed or mounted artifacts passed independent exact-byte GETs, and the race detector reported no race. |
+| Redirect credential scope | N/A | Filesystem-backed GitLab emitted no off-origin redirect, so the credential-stripping path was not exercised. |
+| Upload `Location` | PASS | Successful operations followed GitLab's same-origin absolute opaque upload locations. |
+| Throttling retry | N/A | The bounded local campaign produced no `429` response. |
+
+### Verification and cleanup
+
+The normal and `GOMAXPROCS=8` race campaigns produced identical matrices: 17 PASS, three N/A, and zero NO, BLOCKED, or FAIL rows. The normal test completed in 6.38 seconds; the race test completed in 6.25 seconds with no race report. ORAS independently seeded the source through a standard OCI 1.0 image manifest and later fetched the mounted destination from both fresh normal and race repository paths with exact bytes.
+
+Cleanup deleted all 21 registry repositories through GitLab's API, polled both projects until their registry repository lists were empty, permanently removed both projects and confirmed `404`, and revoked the personal access token. It then removed the exact GitLab container and network, native arm64 image, campaign TLS and passwords, GitLab data and logs, immutable source export, fixtures, harness, and evidence. Ports 9444 and 5055 were closed. The unrelated pre-existing GitHub MCP container was not touched, and the main checkout remained clean.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Final normal GitLab matrix | `ec03840cdedfd94fcab4362bded11554e4b0e22df57ab1178a9dffa112a86c01` |
+| Final race GitLab matrix | `ec03840cdedfd94fcab4362bded11554e4b0e22df57ab1178a9dffa112a86c01` |
+| Disposable GitLab matrix harness | `01254b251ced7aa4ff77a5f1729fcc5efd882409937ed5ad523aefd0e3938e95` |
+| GitLab CE arm64 image | `sha256:87eb39b6a5aa34fc1b4554689cd3996c5311a926753c8e0871c1e8df43992e94` |

@@ -173,3 +173,15 @@ Protocol and concurrency proof: ORAS independently seeded a 4 MiB source layer. 
 Cleanup: Stopped and removed the exact nine-container Harbor Compose deployment and its network, then removed the private projects, filesystem data, TLS material, credential, immutable export, harness, fixtures, logs, and evidence. Confirmed port 9443 was closed and no Harbor campaign container or network remained. The unrelated GitHub MCP container stayed running, and the main checkout remained clean.
 
 Next: Commit and push only the Harbor journal results, then continue with the next local OSS registry candidate.
+
+## 2026-08-12 16:50 — GitLab native registry compatibility campaign
+
+Target and isolation: Deployed the official GitLab Community Edition `19.2.1` native arm64 Docker image with its bundled container registry, distinct campaign-TLS GitLab and registry endpoints, filesystem storage, and private source and destination projects. GitLab's real `/jwt/auth` flow issued repository-scoped registry tokens from a disposable personal access token. The consumer used a read-only export of commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`; no library source changed.
+
+Authoritative result: Fresh normal and `GOMAXPROCS=8` race repository paths each produced 17 PASS and three N/A rows with identical matrices. HTTPS/GitLab Bearer authentication, small blobs, present/missing Exists, serial Pull, progress, PullRange, native parallel Pull, interrupted-stream resume, unreferenced retrieval, monolithic Push, empty-blob Push/Pull, 1 MiB-configured chunked Push, wrong-digest and exact-size safety, cross-project Mount, shared-client concurrency, and absolute upload Locations passed. Range-ignored fallback, off-origin credential scope, and throttling remained N/A because the bundled filesystem registry served native ranges, did not redirect storage, and emitted no `429`.
+
+Protocol and concurrency proof: ORAS independently seeded a 4 MiB OCI layer. Parallel Pull used sixteen `206` requests with all four configured response bodies active and none remaining afterward. A forced body break resumed through a range request. The 3,145,839-byte chunked upload used four acknowledged PATCHes and an empty final `PUT 201`. Wrong-digest rejection left both possible digests absent and attempted cleanup. Mount returned `201`; raw HTTP and ORAS independently verified both fresh destinations. Twenty barrier-started mixed operations created eight artifacts, all independently fetched exactly; the race detector reported no race.
+
+Cleanup: Deleted all 21 GitLab registry repositories, polled both project registry lists to empty, permanently deleted both projects and confirmed `404`, and revoked the personal access token. Removed the container, network, native arm64 image, TLS, root password, GitLab data and logs, immutable export, fixtures, harness, and evidence. Ports 9444 and 5055 were closed, the unrelated GitHub MCP container remained running, and the main checkout stayed clean.
+
+Next: Commit and push only the GitLab journal results, then continue with the next OSS registry candidate.
