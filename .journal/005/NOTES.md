@@ -101,3 +101,23 @@ Security and cleanup: No Authorization, Cookie, Cookie2, proxy authorization, or
 Cleanup: Recorded the final evidence and harness hashes in the results ledger, then removed the entire disposable harness, immutable source export, fixtures, and evidence directory. The external package audit remained empty and the main checkout remained clean.
 
 Next: Commit and push only the journal results, then await the next registry candidate.
+
+## 2026-08-12 12:46 — Docker Hub compatibility campaign
+
+Target and isolation: Retrieved the shared `gilmanagents` Docker Hub PAT from the unlocked Bitwarden MCP item `Docker Hub PAT agents-cli-full`, without logging or writing the credential. Tested `registry-1.docker.io` from a disposable external consumer against a read-only export of merged commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`. Go was `1.26.4 darwin/arm64`; ORAS was `1.3.0+unreleased`. The main checkout remained clean and no library file was changed.
+
+Cleanup calibration: A tiny repository create/delete probe established that the current Docker Hub API returns `202 Accepted` for asynchronous repository deletion. The cleanup gate therefore polls each repository to `404` and requires the exact prefix count to reach zero. The first probe disappeared, and every later calibration and campaign repository was likewise confirmed absent before continuing.
+
+Harness calibration: The first write pass failed with 401 while ORAS wrote successfully using the same PAT. A raw control then proved that a directly requested `repository:...:pull,push` token opened an upload session with `POST 202`. The root cause was the disposable inherited bearer-challenge parser splitting the quoted `pull,push` value at its comma and requesting a pull-only token. A quote-aware parser plus repository and pull/push scoped token caching fixed the harness. All affected repositories were deleted before fresh reruns, and no library change was made.
+
+Authoritative result: The final race-enabled campaign produced 19 PASS, zero NO, zero BLOCKED, zero FAIL, and two N/A rows. HTTPS and PAT authentication, independent ORAS controls, small blobs, Exists, serial Pull, progress, native PullRange, native parallel Pull, interrupted-stream resume, unreferenced retrieval, monolithic Push, empty-blob Push/Pull, 1 MiB-configured chunked Push, wrong-digest and exact-size safety, cross-repository Mount, shared-client concurrency, redirect credential isolation, and same-origin absolute upload Locations passed. The 21-operation concurrency phase completed in 11.73 seconds under the race detector and independently verified four uploaded artifacts.
+
+Protocol observations: Docker Hub redirected reads with `307` to off-origin storage, which served native `200`, ranged `206`, and past-end `416` responses. The configured parallel Pull made nine range requests, observed three concurrent bodies in the authoritative run and four in calibration, and ended with none active. A forced break after 1 MiB resumed via native `206`. The 8,389,341-byte chunked upload used nine `PATCH 202` requests and a final `PUT 201`. A fresh empty blob completed with `PUT 201`. Cross-repository Mount returned `201`. Completed monolithic blobs were readable before manifest linking.
+
+Reliability quirk: Wrong-digest commit correctly returned `400 DIGEST_INVALID`, and neither candidate digest became available. The library attempted upload-session deletion, but Docker Hub returned `500` on that cleanup request. Short and trailing reader cleanup returned `204`. Because the lone `500` was not followed by a successful same-request retry, the throttling/retry row remains N/A rather than being overclaimed as PASS.
+
+Security and cleanup: No Authorization, Cookie, Cookie2, proxy authorization, or Referer header crossed into off-origin library traffic; no signed query value was retained; the PAT occurred zero times in saved evidence or harness files. Both authoritative repositories returned asynchronous delete `202`, later polled to `404`, and the broader `go-oci-blob-` prefix audit returned zero repositories. The read-only source export had zero writable files and the main worktree remained clean.
+
+Cleanup: Recorded the evidence and harness hashes in the results ledger, then removed the disposable harness, immutable source export, fixtures, evidence, and calibration scripts. The Docker Hub prefix audit remained zero and the main checkout remained clean.
+
+Next: Commit and push only the journal results, then await the next registry candidate.

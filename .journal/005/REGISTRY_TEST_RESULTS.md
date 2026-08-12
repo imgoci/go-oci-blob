@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR |
-|---|---|---|
-| HTTPS and authentication | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS |
-| Serial `Pull` | PASS | PASS |
-| Progress reporting | PASS | PASS |
-| `PullRange` | PASS | PASS |
-| Parallel `Pull` | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO |
-| Chunked `Push` | NO | PASS |
-| Wrong-digest rejection | PASS | PASS |
-| Exact-size rejection | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS |
-| Shared-client concurrency | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS |
-| Upload `Location` handling | PASS | PASS |
-| Retry after registry throttling | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub |
+|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS |
+| Chunked `Push` | NO | PASS | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS |
+| Upload `Location` handling | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -167,3 +167,64 @@ The runner deleted both authoritative GHCR packages and polled the package API u
 | Disposable GHCR helper | `eeccf33d8bc05495da6a2706ec6e4a7ac53eb6c128ed49ba2eabc2ca192f28df` |
 | Disposable GHCR matrix | `26b19cda2c1d7590df129be99c98efc5c25be00c3781e39f10eda7cd1ef6b736` |
 | Disposable cleanup runner | `a44f948ec1d7030d23e64f6d0c31c42a01b4f25e38fa86b6918bb2f76181164e` |
+
+## Docker Hub
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Account | `gilmanagents` |
+| Registry host | `registry-1.docker.io` |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 1 MiB chunks |
+| Chunked-upload configuration | 1 MiB; the failure-only repeat and 5 MiB diagnostic were not needed |
+| Retry configuration | 3 attempts, 100 ms initial delay, 2 s maximum delay |
+| Operation timeout | 90 seconds |
+| Authoritative repository prefix | `go-oci-blob-coord-dh-20260812t194148z-40085-` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | Unauthenticated `/v2/` returned `401`; a bearer token exchanged from the Bitwarden-sourced Docker Hub PAT returned `200`. |
+| Independent seed control | PASS | ORAS seed, raw HEAD and GET, and ORAS fetch agreed on the exact 8,388,865 bytes. |
+| Small blob, 1,027 bytes | PASS | Independent seed and exact library and raw retrieval succeeded. |
+| `Exists` | PASS | A present digest returned true through `HEAD 200`; a missing digest returned false through `HEAD 404`. |
+| Serial `Pull` | PASS | Exact bytes and digest, monotonic progress, final total, and verified EOF passed. |
+| Progress reporting | PASS | Counts were monotonic, ended at the expected total, and did not overlap within the transfer. |
+| `PullRange` | PASS | Beginning, middle, and tail windows returned exact bytes through off-origin `206`; past-end returned `416`, and a range crossing EOF was rejected. |
+| Parallel `Pull` | PASS | Nine ranged requests completed through off-origin `206`; three bodies overlapped and zero remained active at completion. A calibration pass observed all four configured workers active. |
+| Parallel range-ignored fallback | N/A | Docker Hub storage served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A forced body break after 1 MiB resumed through a ranged off-origin `206` and returned exact bytes. |
+| Unreferenced blob retrieval | PASS, observed | Before any manifest reference, library Pull, raw GET, and ORAS fetch all returned the exact completed monolithic blob. |
+| Monolithic `Push` | PASS | Docker Hub returned `POST 202` then a body-bearing `PUT 201`; independent raw and ORAS verification passed after manifest linking. |
+| Empty blob | PASS | A fresh destination returned `HEAD 404`, then accepted `POST 202` and zero-byte `PUT 201`; raw and library reads returned exactly zero bytes after independent manifest linking. |
+| Chunked `Push` | PASS | The 8,389,341-byte upload used nine 1 MiB-configured `PATCH 202` requests and a final `PUT 201`; HEAD and exact raw verification passed. |
+| Wrong digest | PASS | Docker Hub rejected the commit with `400 DIGEST_INVALID`; neither the claimed nor calculated digest became available. The library attempted session deletion, whose authenticated request received `500`. |
+| Exact reader size | PASS | Short and trailing readers were rejected, neither possible digest became available, and both authenticated cleanup requests returned `204`. |
+| Cross-repository `Mount` | PASS | Docker Hub returned `POST 201`; the library returned `(true, nil)`, and the destination passed exact raw verification after an independent manifest link. |
+| Shared-client concurrency | PASS | Twenty-one barrier-started mixed operations passed under the race detector in 11.73 seconds. Four pushed artifacts were independently verified; no ranged body remained active and no retryable status occurred. |
+| Redirect credential scope | PASS | Blob reads used `307` to off-origin storage. No registry authorization, Cookie, Cookie2, proxy authorization, or Referer header crossed origins in library traffic. |
+| Upload `Location` | PASS | Docker Hub returned same-origin absolute upload locations. Successful and safely rejected operations followed their opaque state without retaining values in evidence. |
+| Throttling retry | N/A | The campaign observed no throttled transfer. One isolated cleanup `DELETE` returned `500` without a successful retry, which is not positive retry evidence. |
+
+### Harness calibration
+
+Docker Hub's bearer challenge contains the quoted scope value `pull,push`. The first disposable parser incorrectly split that quoted comma, obtained a pull-only token, and produced write-side `401` responses even though ORAS writes succeeded. A raw same-PAT control proved `POST 202`; replacing the disposable parser with quote-aware handling resolved every write path. These were harness calibration runs and are not registry compatibility results.
+
+### Cleanup
+
+Docker Hub accepted repository deletion asynchronously with `202`. The runner polled both authoritative repositories until the API returned `404`, then independently required their exact prefix count to be zero. A broader audit found zero repositories under every `go-oci-blob-` test and calibration prefix. The PAT occurred zero times in the evidence and harness files. The disposable source export remained read-only and the main checkout remained unchanged.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Authoritative Docker Hub campaign | `4436cd505e1d0b578499639823a60d02756d885e75e4aba6521247ce462c2c0f` |
+| Disposable Docker Hub helper | `7c96da36f94047a23e0db3445c057e92e6f808bb71b9a831cf73696f13e6afe6` |
+| Disposable Docker Hub matrix | `46d882b54f1ff6eca90e241e23b8a65159b245dc2dddad5d4b5302967dd3257c` |
+| Disposable cleanup runner | `47089799d4e6877eaaf93ce62a210f942c393e435a7ce142bff06b44e63e9bcd` |
