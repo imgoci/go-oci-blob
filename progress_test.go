@@ -1,14 +1,17 @@
 package blob_test
 
 // Scripted-conversation tests for progress reporting: cumulative,
-// monotonic, and never double-counted across retries, resumes, and
-// restarts.
+// monotonic, serialized within one transfer, and never double-counted
+// across retries, resumes, and restarts.
 
 import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -20,12 +23,28 @@ import (
 
 // progressLog records WithProgress callbacks and checks invariants.
 type progressLog struct {
+	// mu protects dones and total from callback concurrency regressions.
+	mu sync.Mutex
+	// dones contains every cumulative byte count reported by one transfer.
 	dones []int64
+	// total is the most recently reported transfer size.
 	total int64
+	// active counts callbacks that have started but not returned.
+	active atomic.Int64
+	// overlapped records whether two callbacks ran at the same time.
+	overlapped atomic.Bool
 }
 
+// option returns a progress option that records calls and detects overlap.
 func (p *progressLog) option() blob.TransferOption {
 	return blob.WithProgress(func(done, total int64) {
+		if p.active.Add(1) != 1 {
+			p.overlapped.Store(true)
+		}
+		defer p.active.Add(-1)
+
+		p.mu.Lock()
+		defer p.mu.Unlock()
 		p.dones = append(p.dones, done)
 		p.total = total
 	})
@@ -34,19 +53,30 @@ func (p *progressLog) option() blob.TransferOption {
 // assertMonotonic fails if the recorded counts ever move backward.
 func (p *progressLog) assertMonotonic(t *testing.T) {
 	t.Helper()
+	require.Zero(t, p.active.Load(), "callbacks must finish on the transfer path")
+	require.False(t, p.overlapped.Load(), "callbacks within one transfer must not overlap")
+	dones, _ := p.snapshot()
 	var prev int64
-	for _, done := range p.dones {
-		require.GreaterOrEqual(t, done, prev, "progress must never move backward: %v", p.dones)
+	for _, done := range dones {
+		require.GreaterOrEqual(t, done, prev, "progress must never move backward: %v", dones)
 		prev = done
 	}
 }
 
 // final returns the last reported count, or zero when none arrived.
 func (p *progressLog) final() int64 {
-	if len(p.dones) == 0 {
+	dones, _ := p.snapshot()
+	if len(dones) == 0 {
 		return 0
 	}
-	return p.dones[len(p.dones)-1]
+	return dones[len(dones)-1]
+}
+
+// snapshot returns a copy of the recorded callback counts and total.
+func (p *progressLog) snapshot() ([]int64, int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.dones), p.total
 }
 
 // sizedResponse builds a 200 response whose ContentLength matches the
@@ -78,7 +108,8 @@ func TestPullProgress(t *testing.T) {
 		require.NoError(t, rc.Close())
 		log.assertMonotonic(t)
 		assert.Equal(t, int64(len(content)), log.final(), "progress must end at the blob size")
-		assert.Equal(t, int64(len(content)), log.total)
+		_, total := log.snapshot()
+		assert.Equal(t, int64(len(content)), total)
 	})
 
 	t.Run("does not double-count across a broken-stream resume", func(t *testing.T) {
@@ -120,7 +151,8 @@ func TestPullProgress(t *testing.T) {
 		require.NoError(t, rc.Close())
 		log.assertMonotonic(t)
 		assert.Equal(t, int64(len(content)), log.final())
-		assert.Equal(t, int64(len(content)), log.total,
+		_, total := log.snapshot()
+		assert.Equal(t, int64(len(content)), total,
 			"the probe's Content-Range total must reach the callback")
 	})
 }
@@ -145,7 +177,8 @@ func TestPullRangeProgress(t *testing.T) {
 	require.NoError(t, rc.Close())
 	log.assertMonotonic(t)
 	assert.Equal(t, int64(10), log.final())
-	assert.Equal(t, int64(10), log.total, "the requested window length is the total")
+	_, total := log.snapshot()
+	assert.Equal(t, int64(10), total, "the requested window length is the total")
 }
 
 func TestPushProgress(t *testing.T) {
@@ -174,7 +207,8 @@ func TestPushProgress(t *testing.T) {
 		log.assertMonotonic(t)
 		assert.Equal(t, int64(len(content)), log.final(),
 			"a restarted upload must not double-count: final equals size, not 2x")
-		assert.Equal(t, int64(len(content)), log.total)
+		_, total := log.snapshot()
+		assert.Equal(t, int64(len(content)), total)
 	})
 
 	t.Run("reports committed chunks during a chunked upload", func(t *testing.T) {
@@ -194,7 +228,9 @@ func TestPushProgress(t *testing.T) {
 			int64(len(content)), strings.NewReader(content), log.option())
 
 		require.NoError(t, err)
-		assert.Equal(t, []int64{8, 16, int64(len(content))}, log.dones,
+		log.assertMonotonic(t)
+		dones, _ := log.snapshot()
+		assert.Equal(t, []int64{8, 16, int64(len(content))}, dones,
 			"each verified ack commits exactly one chunk")
 	})
 }

@@ -32,9 +32,11 @@ func applyTransferOptions(opts []TransferOption) transferConfig {
 // the caller. Monolithic Push reports only after the final 201 response;
 // chunked Push advances after each PATCH Range acknowledgement, so reaching
 // total does not prove the final commit succeeded. Only a nil Push error does.
-// Counts never move backward across retries or resumes, and callbacks never
-// run concurrently with themselves. fn runs synchronously on the transfer
-// path, so it must return quickly.
+// Within one transfer, counts never move backward across retries or resumes,
+// and calls to fn do not overlap, including during a parallel Pull. Concurrent
+// transfers may call the same fn at the same time, so fn must protect any
+// state shared between transfers. fn runs synchronously on the transfer path,
+// so it must return quickly.
 func WithProgress(fn func(done, total int64)) TransferOption {
 	return func(cfg *transferConfig) {
 		cfg.progress = fn
