@@ -29,3 +29,13 @@ Contract findings: `RetryPolicy.MaxAttempts` says one operation has one total at
 Hosted characterization: GHCR accepted an unreferenced blob with `201` and answered HEAD as present but returned `BLOB_UNKNOWN` to GET; an ORAS blob-only control behaved the same. After ORAS linked the same bytes through a minimal manifest, independent ORAS fetch plus library serial and parallel Pull all verified the exact bytes. Every uniquely named GHCR package was deleted and confirmed absent.
 
 Next: Finish the aggregate normal/race reruns after final harness review, verify all temporary processes/containers/hosted packages are gone, record artifact hashes and source immutability, then report the pass/fail matrix without merging any test code.
+
+## 2026-08-12 02:02 — Final evidence and cleanup audit
+
+Aggregate result: The final positive consumer suite passed 32 top-level tests and 118 test nodes with zero skips or failures. A focused race run passed 23 protocol/fault/TLS top-level tests and 59 nodes. The resource lane passed three normal repetitions plus race; the concurrency lane passed 648 mixed operations across `GOMAXPROCS=1,2,8` plus a revised three-repeat race check. The strict cross-transfer callback probe failed reproducibly in all three repetitions, confirming that the same callback can overlap when reused by concurrent transfers even though ordinary per-transfer callback serialization passed.
+
+Final classifications: No functional data-integrity, retry, streaming, shared-client race, cleanup, TLS/auth, Registry 2, Zot, or GHCR lifecycle defect was found. The remaining actionable contract issue is the unqualified `WithProgress` serialization wording. The parallel retry wording is ambiguous between operation and logical-request scopes. The design's advertised-range gate for broken-stream resume is stale in a reliability-positive direction: the implementation resumes without the advertisement and safely accepts a full-200 fallback. The README's claim that no public API exists is also stale.
+
+Cleanup and proof: A fresh `git archive` diff against the temporary source was empty; the source has zero user-writable files; the real checkout is still clean at the same commit and tree. All current-run Registry 2, Zot, TLS registry, and Ryuk containers were removed. The only Docker resources left are one unrelated running GitHub MCP container and two unrelated stale Aug 8 resources that predated the campaign. No uniquely named GHCR functional package remains. Harness/evidence checksums are in `/tmp/go-oci-blob-functional.quDtZu/evidence/SHA256SUMS`; the resource report is `resource-lane.md`.
+
+Next: Deliver the final manual functional-test verdict. No test harness or library change will be merged.
