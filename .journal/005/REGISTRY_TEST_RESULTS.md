@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub |
-|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS |
-| Chunked `Push` | NO | PASS | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS |
-| Upload `Location` handling | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed |
+|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO |
+| Chunked `Push` | NO | PASS | PASS | NO |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A |
+| Upload `Location` handling | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -228,3 +228,66 @@ Docker Hub accepted repository deletion asynchronously with `202`. The runner po
 | Disposable Docker Hub helper | `7c96da36f94047a23e0db3445c057e92e6f808bb71b9a831cf73696f13e6afe6` |
 | Disposable Docker Hub matrix | `46d882b54f1ff6eca90e241e23b8a65159b245dc2dddad5d4b5302967dd3257c` |
 | Disposable cleanup runner | `47089799d4e6877eaaf93ce62a210f942c393e435a7ce142bff06b44e63e9bcd` |
+
+## Google Container Registry URL
+
+This campaign targeted `gcr.io`, but Google has retired the legacy Container Registry backend. The shared project's `REDIRECTION_FROM_GCR_IO_ENABLED` setting routed the hostname to an Artifact Registry `gcr.io` repository in the `us` multi-region. The compatibility results therefore describe the current `gcr.io` URL surface, not the retired service.
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Project | `agents-shared-505304` |
+| Registry host | `gcr.io` |
+| Serving backend | Artifact Registry `projects/agents-shared-505304/locations/us/repositories/gcr.io` |
+| Redirection state | `REDIRECTION_FROM_GCR_IO_ENABLED` |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 256 KiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | 4 attempts, 100 ms initial delay, 2 s maximum delay |
+| Campaign timeout | 12 minutes |
+| Authoritative namespace | `agents-shared-505304/go-oci-blob-ft-20260812200432` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | Unauthenticated `/v2/` returned `401`; a caller-supplied bearer flow backed by the Bitwarden service-account credential returned `200` over HTTPS. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent authenticated GET returned exact bytes and digest. |
+| `Exists` | PASS | A present digest returned true; a missing digest returned false without an error. |
+| Serial `Pull` | PASS | The full 3,146,061-byte body reached verified EOF with exact bytes and an independent SHA-256 match. |
+| Progress reporting | PASS | Counts were monotonic, ended at the exact byte total, and did not overlap within the transfer. |
+| `PullRange` | PASS | Beginning, middle, and tail windows were exact. Past-end and crossing-EOF ranges were rejected. |
+| Parallel `Pull` | PASS | Seventeen ranged `206` responses returned exact ordered bytes; three response bodies overlapped and zero remained active. The race run reproduced the same result. |
+| Parallel range-ignored fallback | N/A | `gcr.io` served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected body break resumed with three ranged requests and returned exact bytes. |
+| Unreferenced blob retrieval | PASS, observed | Immediately after monolithic completion and before any manifest existed, raw GET and independent ORAS blob fetch returned the exact 3,146,061 bytes and digest. |
+| Monolithic `Push` | PASS | The default path opened an upload and completed with `PUT 201`; independent raw GET verified the exact payload. |
+| Empty blob | NO | The registry opened the upload, then rejected the zero-byte commit with `PUT 400 Bad Request`; the canonical empty digest remained unavailable. |
+| Chunked `Push` | NO | The first 1 MiB `PATCH` returned `202`, the next session request returned `405 Method Not Allowed`, and the digest remained unavailable. |
+| Wrong digest | PASS | The commit failed, both claimed and calculated digests remained absent, and the library's best-effort session DELETE returned `204`. |
+| Exact reader size | PASS | Both short and trailing declarations failed, the digest remained absent, and both best-effort session DELETE requests returned `204`. |
+| Cross-repository `Mount` | PASS | The registry returned `201`; the destination passed an independent exact-byte GET. |
+| Shared-client concurrency | PASS | Twelve barrier-started mixed Pull, PullRange, Exists, Push, and Mount operations completed on shared clients. Every pushed and mounted blob passed an independent exact-byte GET. |
+| Redirect credential scope | N/A | No off-origin redirect occurred in the campaign; every response stayed on `gcr.io`. |
+| Upload `Location` | PASS | Successful uploads followed relative opaque locations through final `PUT 201`. |
+| Throttling retry | N/A | No safe deterministic hosted throttling trigger was available and no `429` or `5xx` response occurred. |
+
+### Verification and cleanup
+
+The normal campaign and its `GOMAXPROCS=8` race run both produced 15 PASS, two NO, three N/A, and zero FAIL rows. The race detector reported no race. ORAS independently fetched the unreferenced 3,146,061-byte blob and matched `sha256:3c219121fac4cc317d0b4046539d879a724b17b492b430589f30033151419b79`.
+
+Preflight found redirection enabled, no `gcr.io` repository, and zero Artifact Registry repositories in the project. The first push auto-created the predefined `us/gcr.io` repository. After testing, the exact repository creation time was checked, the repository was deleted through its long-running operation, and readback returned `404`. The final project repository count returned to zero, while the pre-existing redirection setting remained enabled. The repository contained no packages or Docker images because this campaign intentionally exercised blob APIs without publishing manifests.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Authoritative GCR matrix | `94a226cd9c2a43bc9b3671b85831a59d6321a3e1e9615832f1700ec66e7105db` |
+| Race GCR matrix | `94a226cd9c2a43bc9b3671b85831a59d6321a3e1e9615832f1700ec66e7105db` |
+| Disposable GCR wire evidence | `4d2a031596591ee4dcbccf291ec4d095b36bcf0059bdeb31b0ad52f338aa954b` |
+| Race GCR wire evidence | `1220e880e9cbfb187fd8d2ebcc34d707564f407f560c22f2046a4e0d8b501726` |
+| Disposable GCR matrix harness | `f71e3a32c662d0240fe5235a2de64a5fc0e10b55bdba27785c64706e686fd30d` |

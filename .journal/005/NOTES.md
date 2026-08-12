@@ -121,3 +121,17 @@ Security and cleanup: No Authorization, Cookie, Cookie2, proxy authorization, or
 Cleanup: Recorded the evidence and harness hashes in the results ledger, then removed the disposable harness, immutable source export, fixtures, evidence, and calibration scripts. The Docker Hub prefix audit remained zero and the main checkout remained clean.
 
 Next: Commit and push only the journal results, then await the next registry candidate.
+
+## 2026-08-12 13:07 — GCR URL compatibility campaign
+
+Target and service identity: Retrieved the shared GCP service-account credential from the unlocked Bitwarden secure note without logging its secret fields. Tested the `gcr.io` hostname from a disposable external consumer against a read-only export of merged commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`. Google has shut down the legacy Container Registry backend, so this campaign exercised Artifact Registry's current `gcr.io` compatibility surface. Project preflight reported `REDIRECTION_FROM_GCR_IO_ENABLED`, no `gcr.io` repository, and zero Artifact Registry repositories.
+
+Authoritative result: Normal and `GOMAXPROCS=8` race campaigns each produced 15 PASS, two NO, three N/A, and zero FAIL rows. HTTPS/private authentication, small blobs, present/missing Exists, serial Pull, progress, three valid PullRange windows plus invalid-boundary rejection, native parallel Pull, forced interrupted-stream resume, unreferenced retrieval, monolithic Push, wrong-digest and exact-size safety, cross-repository Mount, shared-client mixed concurrency, and relative upload Locations passed. The race detector reported no race. Independent ORAS retrieval matched all 3,146,061 bytes and digest `sha256:3c219121fac4cc317d0b4046539d879a724b17b492b430589f30033151419b79`.
+
+Compatibility limits: Empty-blob Push is NO: the registry opened a session but rejected the zero-byte final PUT with `400 Bad Request`. Chunked Push is NO at the 1 MiB configuration: the first PATCH returned `202`, the next request returned `405 Method Not Allowed`, and the digest remained absent. Range-ignored fallback, off-origin credential scope, and hosted throttling retry remained N/A because the live service honored ranges, kept responses on `gcr.io`, and did not throttle.
+
+Concurrency and safety proof: Seventeen ranged responses produced exact ordered bytes, three response bodies overlapped, and zero remained active. A forced body break resumed through three ranged requests. Twelve barrier-started Pull, PullRange, Exists, Push, and Mount operations completed on shared clients; every pushed and mounted result passed an independent exact-byte GET. Wrong-digest rejection left both possible digests absent and cleanup returned `204`. Both short and trailing reader failures left the digest absent and cleanup returned `204`.
+
+Cleanup: The first push auto-created the predefined `projects/agents-shared-505304/locations/us/repositories/gcr.io` repository. It contained no packages or Docker images because the tests published no manifests. The cleanup gate matched the exact resource and creation time, deleted it through the Artifact Registry long-running operation, confirmed the repository returned `404`, and confirmed the project repository count returned to zero. The pre-existing redirection setting remains enabled. No library file was modified.
+
+Next: Commit and push only the journal results, then await the next registry candidate.
