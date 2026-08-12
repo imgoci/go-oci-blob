@@ -135,3 +135,17 @@ Concurrency and safety proof: Seventeen ranged responses produced exact ordered 
 Cleanup: The first push auto-created the predefined `projects/agents-shared-505304/locations/us/repositories/gcr.io` repository. It contained no packages or Docker images because the tests published no manifests. The cleanup gate matched the exact resource and creation time, deleted it through the Artifact Registry long-running operation, confirmed the repository returned `404`, and confirmed the project repository count returned to zero. The pre-existing redirection setting remains enabled. No library file was modified.
 
 Next: Commit and push only the journal results, then await the next registry candidate.
+
+## 2026-08-12 13:48 — Quay.io compatibility campaign
+
+Target and isolation: Retrieved the shared `gilmanagents` Quay account credential from the unlocked Bitwarden vault. Because the account is backed by Red Hat SSO and has no standalone Quay password, created a disposable robot and granted it write access only to two uniquely named public repositories. Tested `quay.io` from a disposable external consumer against a read-only export of merged commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`; the export retained zero user-writable files and no library source was changed.
+
+Authoritative result: Final normal and race campaigns each produced 17 PASS, one NO, and two N/A rows. HTTPS robot authentication, small blobs, present/missing Exists, serial Pull, progress, PullRange, native parallel Pull, interrupted-stream resume, unreferenced retrieval, monolithic Push, 1 MiB-configured chunked Push, wrong-digest and exact-size safety, cross-repository Mount, shared-client mixed concurrency, off-origin credential isolation, and absolute upload Locations passed. The race detector reported no race.
+
+Compatibility limit: Empty-blob Push is NO. Quay returned success from the zero-byte Push and then answered HEAD as present, but both raw GET and library Pull returned `404`. An independent ORAS blob fetch also returned not found. This reproduces across the final normal and race campaigns and contrasts with the independently fetched and SHA-256-verified 2,097,289-byte control blob.
+
+Protocol observations: Nine native ranged `206` responses returned exact parallel bytes, with two response bodies overlapping and none remaining active. A forced break after 128 KiB resumed through ranged requests. A 3,146,061-byte chunked upload used four PATCH requests and returned exact bytes. Cross-repository Mount succeeded and the destination returned exact bytes. Forty-three off-origin requests carried no registry authorization, and successful uploads followed same-origin absolute Locations.
+
+Cleanup: Deleted both uniquely named public repositories and verified the account repository list returned to zero. Deleted the disposable robot and verified the account reported no robot accounts. The main worktree remained clean. Recorded the authoritative results and hashes in the dedicated registry results ledger, then removed the disposable credentials, harness, source export, and evidence.
+
+Next: Commit and push only the journal results, then await the next registry candidate.

@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed |
-|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO |
-| Chunked `Push` | NO | PASS | PASS | NO |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A |
-| Upload `Location` handling | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io |
+|---|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO |
+| Chunked `Push` | NO | PASS | PASS | NO | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS |
+| Exact-size rejection | PASS | PASS | PASS | PASS | PASS |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS |
+| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS |
+| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -291,3 +291,62 @@ Preflight found redirection enabled, no `gcr.io` repository, and zero Artifact R
 | Disposable GCR wire evidence | `4d2a031596591ee4dcbccf291ec4d095b36bcf0059bdeb31b0ad52f338aa954b` |
 | Race GCR wire evidence | `1220e880e9cbfb187fd8d2ebcc34d707564f407f560c22f2046a4e0d8b501726` |
 | Disposable GCR matrix harness | `f71e3a32c662d0240fe5235a2de64a5fc0e10b55bdba27785c64706e686fd30d` |
+
+## Quay.io
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Account | `gilmanagents` |
+| Registry host | `quay.io` |
+| Credential model | Disposable robot with write access limited to the two campaign repositories |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 256 KiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | 4 attempts, 100 ms initial delay, 2 s maximum delay |
+| Campaign timeout | 12 minutes |
+| Source repository | `gilmanagents/go-oci-blob-ft-20260812202302-source` |
+| Destination repository | `gilmanagents/go-oci-blob-ft-20260812202302-dest` |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | A caller-supplied bearer flow backed by the disposable robot returned `200` from `/v2/` over HTTPS. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent GET returned all 1,027 exact bytes. |
+| `Exists` | PASS | A present digest returned true and a fresh missing digest returned false without errors. |
+| Serial `Pull` | PASS | The full 2,097,289-byte body reached verified EOF with exact bytes and digest. Independent ORAS retrieval matched the same size and SHA-256. |
+| Progress reporting | PASS | Counts were monotonic, ended at the exact byte total, and did not overlap within the transfer. |
+| `PullRange` | PASS | Beginning, middle, and tail windows were exact through native `206` responses. A past-end request was rejected. |
+| Parallel `Pull` | PASS | Nine ranged `206` responses returned exact ordered bytes. Two response bodies overlapped in both final normal and race runs, and zero remained active. |
+| Parallel range-ignored fallback | N/A | Quay served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected body break after 128 KiB resumed through ranged requests and returned exact bytes. |
+| Unreferenced blob retrieval | PASS, observed | Before any manifest existed, raw GET and independent ORAS blob fetch returned the exact completed 2,097,289-byte blob and digest. |
+| Monolithic `Push` | PASS | The default path used a body-bearing final PUT with no PATCH, and independent raw retrieval returned exact bytes. |
+| Empty blob | NO | Quay accepted the zero-byte Push, and `Exists` then reported true, but raw GET and library Pull returned `404`. An independent ORAS blob fetch also returned not found. |
+| Chunked `Push` | PASS | A 3,146,061-byte upload used four 1 MiB-configured PATCH requests and completed successfully; independent raw retrieval returned exact bytes. |
+| Wrong digest | PASS | The upload failed, neither the claimed nor calculated digest became available, and the library attempted session cleanup. |
+| Exact reader size | PASS | A trailing-byte declaration failed, the digest remained absent, and the library attempted session cleanup. |
+| Cross-repository `Mount` | PASS | Quay returned a successful mount; the destination passed an independent exact-byte GET. |
+| Shared-client concurrency | PASS | Twenty concurrent Pull, PullRange, Exists, Push, and Mount operations completed without errors. The mounted result passed an independent exact-byte GET, and the race detector reported no race. |
+| Redirect credential scope | PASS | The campaign observed 43 off-origin storage requests. No registry authorization header crossed origins. |
+| Upload `Location` | PASS | Successful uploads followed same-origin absolute opaque locations; 58 such responses were observed across the final campaign. |
+| Throttling retry | N/A | No safe deterministic hosted throttling trigger was available and no controlled `429` response was produced. |
+
+### Verification and cleanup
+
+The final normal and race campaigns each produced 17 PASS, one NO, and two N/A rows. The normal run completed in 21.43 seconds; the race test completed in 20.79 seconds with no race report. An independent ORAS control fetched and hash-verified the 2,097,289-byte main blob, while its empty-digest fetch independently reproduced the registry's not-found response.
+
+Both uniquely named public repositories were deleted and the account repository list returned to zero. The disposable robot was deleted and the account reported no robot accounts. The immutable source export had zero user-writable files, and the main checkout remained clean at the tested commit.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Final normal Quay matrix | `85e221dccc9cf7bef6ba62e3e303bee2f606524d5c6c64fa1513f0f5f5e0a46e` |
+| Final race Quay matrix | `1d48ebe090f359e6186456c59f39c432c1d4d919ce89315c8f97730af160efa3` |
+| Disposable Quay matrix harness | `3c6d8fdc36a7c0dc18491ff437177ec50f05a70ce28a0dab0fa463dccb3bab8a` |
