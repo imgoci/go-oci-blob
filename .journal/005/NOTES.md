@@ -55,3 +55,11 @@ Next: Await review and hosted checks. Do not merge or close session 005 without 
 ## 2026-08-12 10:05 — Hosted checks green
 
 PR #24 passed CI, both Go and Actions CodeQL analyses, and the GitHub Pages validation. The PR remains open and unmerged for user review.
+
+## 2026-08-12 10:09 — Progress callback contract fix merged
+
+Merged PR #24 through GitHub with a squash merge pinned to reviewed head `2d238b667d555070484c5da1d5bb4e26b55f631b`. `master` now contains `8700a0989bb82ca272ca986e2dc8eae79536d1b5` (`fix: clarify progress callback concurrency contract (#24)`). The remote feature branch, clean local feature worktree, local feature branch, and disposable docs build environment were removed after Worktrunk confirmed the branch tree matched `master`.
+
+Post-merge verification: CI, both CodeQL workflows, Release Please, and GitHub Pages all passed on the merged commit. The main worktree is clean and synchronized with `origin/master`.
+
+Next: Keep session 005 open for further user direction.
