@@ -63,3 +63,15 @@ Merged PR #24 through GitHub with a squash merge pinned to reviewed head `2d238b
 Post-merge verification: CI, both CodeQL workflows, Release Please, and GitHub Pages all passed on the merged commit. The main worktree is clean and synchronized with `origin/master`.
 
 Next: Keep session 005 open for further user direction.
+
+## 2026-08-12 11:02 — Amazon ECR compatibility campaign
+
+Target and isolation: Tested Amazon ECR Private in account `803789966077`, region `us-east-2`, from a disposable external consumer against a read-only export of merged commit `8700a0989bb82ca272ca986e2dc8eae79536d1b5`. Go was `1.26.4 darwin/arm64`; ORAS was `1.3.0+unreleased`. The project checkout remained clean and no library file was changed.
+
+Passing capabilities: HTTPS and token authentication, independently seeded small and 8 MiB blobs, present/missing `Exists`, serial Pull, progress, bounded `PullRange`, native ranged parallel Pull with exactly four simultaneous response bodies, interrupted-stream resume, unreferenced blob retrieval, monolithic Push, wrong-digest and exact-size rejection, off-origin redirect credential scoping, opaque same-origin upload Locations, and a 23-operation shared-client concurrency campaign all passed. The concurrency run completed under the race detector in 21.83 seconds, independently verified four uploaded artifacts, left no ranged bodies active, observed no retryable status, and reported no race.
+
+Compatibility limits: Empty-blob Push failed twice, including once in a fresh repository: ECR opened the upload with `202` and then rejected the zero-byte final `PUT` with `400 BLOB_UPLOAD_INVALID` because no parts existed. Chunked Push failed reproducibly with fresh digests at the configured 1 MiB setting and a 5 MiB diagnostic setting. ECR advertised `OCI-Chunk-Min-Length: 10485760`, accepted the resulting 8–10 MiB `PATCH` body with `201 Created` instead of a continuation response, and did not make the blob available; the library rejected the response and attempted cleanup. Cross-repository Mount remains uncharacterized because the regional `BLOB_MOUNTING` account setting is `DISABLED`; the observed `202` decline cleanly mapped to `false, nil`, so the row is blocked by configuration rather than unsupported.
+
+Wire and cleanup proof: ECR redirected blob reads with `307` to off-origin storage, which returned native `200`, `206`, and past-end `416` responses. No registry credential, Cookie/Cookie2, proxy authorization, or Referer reached off-origin storage, and no transport-role mismatch or unredacted signed query was retained. The full race-enabled campaign took 95.41 seconds. Evidence SHA-256 was `3a696b290802c016c47d91d89bb00ba4254e344d6dc070d9d339b3c39f67eb9a`; the fresh-repository empty-repeat evidence hash was `4f5f1d6e479494baa17bcfdcc4540ced37f6cdfcb536e4e4aa481999c736adac`. All three uniquely tagged repositories were force-deleted and confirmed absent; `BLOB_MOUNTING` remained disabled.
+
+Next: Report the ECR feature matrix and preserve the registry-neutral test procedure for the next candidate. Do not merge the disposable harness or evidence.
