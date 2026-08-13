@@ -66,6 +66,48 @@ func (t *progressTracker) set(pos int64) {
 	t.fn(t.done, t.total)
 }
 
+// wireProgressTracker serializes transport-consumption deltas for one Push.
+// A nil tracker is valid and performs no accounting.
+type wireProgressTracker struct {
+	// mu serializes callbacks and the final stop barrier.
+	mu sync.Mutex
+	// fn receives positive transport-consumption deltas.
+	fn func(delta int64)
+	// stopped suppresses callbacks after Push completes.
+	stopped bool
+}
+
+// newWireProgressTracker builds a tracker for fn, or nil when fn is nil.
+func newWireProgressTracker(fn func(delta int64)) *wireProgressTracker {
+	if fn == nil {
+		return nil
+	}
+	return &wireProgressTracker{fn: fn}
+}
+
+// add reports a positive transport-consumption delta.
+func (t *wireProgressTracker) add(delta int64) {
+	if t == nil || delta <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return
+	}
+	t.fn(delta)
+}
+
+// stop waits for any active callback and suppresses future callbacks.
+func (t *wireProgressTracker) stop() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.stopped = true
+	t.mu.Unlock()
+}
+
 // progressReader counts bytes delivered downstream into a tracker.
 type progressReader struct {
 	// body is the wrapped stream.

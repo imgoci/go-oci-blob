@@ -66,6 +66,8 @@ type uploadBody struct {
 	pumpDone bool
 	// written is the number of source bytes the transport actually consumed.
 	written atomic.Int64
+	// wire receives bytes returned to the HTTP transport.
+	wire *wireProgressTracker
 	// releaseCalled prevents released from being closed twice.
 	releaseCalled bool
 }
@@ -80,13 +82,14 @@ type uploadBodyChunk struct {
 }
 
 // newUploadBody wraps exact in an ownership-aware request body.
-func newUploadBody(exact *exactSizeReader) *uploadBody {
+func newUploadBody(exact *exactSizeReader, wire *wireProgressTracker) *uploadBody {
 	return &uploadBody{
 		exact:     exact,
 		chunks:    make(chan uploadBodyChunk, uploadBodyBufferCount),
 		available: make(chan []byte, uploadBodyBufferCount),
 		closed:    make(chan struct{}),
 		released:  make(chan struct{}),
+		wire:      wire,
 	}
 }
 
@@ -114,6 +117,7 @@ func (b *uploadBody) Read(p []byte) (int, error) {
 			b.currentOffset += n
 			b.written.Add(int64(n))
 			b.stateMu.Unlock()
+			b.wire.add(int64(n))
 			var terminalErr error
 			if b.currentOffset == len(b.current) {
 				terminalErr = b.currentErr

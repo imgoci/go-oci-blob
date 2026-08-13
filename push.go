@@ -70,6 +70,8 @@ func (c *Client) Push(
 	}
 	cfg := applyTransferOptions(opts)
 	tracker := newProgressTracker(cfg.progress, size)
+	wire := newWireProgressTracker(cfg.wireProgress)
+	defer wire.stop()
 	replay, err := newReaderReplay(r)
 	if err != nil {
 		return fmt.Errorf("capturing reader position for upload retries: %w", err)
@@ -79,14 +81,14 @@ func (c *Client) Push(
 			return err
 		}
 	}
-	return c.pushWithRetry(ctx, repo, dgst, size, r, tracker, replay)
+	return c.pushWithRetry(ctx, repo, dgst, size, r, tracker, replay, wire)
 }
 
 // pushWithRetry runs complete upload attempts and rewinds the caller's reader
 // between retryable failures.
 func (c *Client) pushWithRetry(
 	ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader,
-	tracker *progressTracker, replay *readerReplay,
+	tracker *progressTracker, replay *readerReplay, wire *wireProgressTracker,
 ) error {
 	uploadOnce := c.pushOnce
 	if c.chunkSize > 0 {
@@ -95,7 +97,7 @@ func (c *Client) pushWithRetry(
 
 	attempts := c.retry.attempts()
 	for attempt := 1; ; attempt++ {
-		retryable, err := uploadOnce(ctx, repo, dgst, size, r, tracker, replay)
+		retryable, err := uploadOnce(ctx, repo, dgst, size, r, tracker, replay, wire)
 		if err == nil {
 			return nil
 		}
@@ -137,7 +139,7 @@ func terminalPushError(err error, retryable bool) error {
 // is not.
 func (c *Client) pushOnce(
 	ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader,
-	tracker *progressTracker, replay *readerReplay,
+	tracker *progressTracker, replay *readerReplay, wire *wireProgressTracker,
 ) (bool, error) {
 	session, retryable, err := c.openSession(ctx, repo, "")
 	if err != nil {
@@ -150,7 +152,7 @@ func (c *Client) pushOnce(
 		}
 	}()
 
-	retryable, err = c.commitUpload(ctx, session, dgst, size, r, replay)
+	retryable, err = c.commitUpload(ctx, session, dgst, size, r, replay, wire)
 	if err != nil {
 		return retryable, err
 	}
@@ -218,10 +220,10 @@ func (c *Client) openSession(
 // same restartability meaning as pushOnce's.
 func (c *Client) commitUpload(
 	ctx context.Context, session *uploadSession, dgst digest.Digest, size int64, r io.Reader,
-	replay *readerReplay,
+	replay *readerReplay, wire *wireProgressTracker,
 ) (bool, error) {
 	uploadURL := withDigest(session.url, dgst)
-	req, initialBody, err := newCommitRequest(ctx, uploadURL, size, r, replay)
+	req, initialBody, err := newCommitRequest(ctx, uploadURL, size, r, replay, wire)
 	if err != nil {
 		return false, err
 	}
@@ -276,11 +278,12 @@ func (c *Client) commitUpload(
 // replay hooks required by OCI and net/http redirects.
 func newCommitRequest(
 	ctx context.Context, uploadURL *url.URL, size int64, r io.Reader, replay *readerReplay,
+	wire *wireProgressTracker,
 ) (*http.Request, *uploadBody, error) {
 	requestBody := io.Reader(http.NoBody)
 	var initialBody *uploadBody
 	if size > 0 {
-		initialBody = newUploadBody(newExactSizeReader(r, size, true))
+		initialBody = newUploadBody(newExactSizeReader(r, size, true), wire)
 		requestBody = initialBody
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL.String(), requestBody)
@@ -291,7 +294,7 @@ func newCommitRequest(
 		if err := replay.register(initialBody); err != nil {
 			return nil, nil, fmt.Errorf("registering commit request body: %w", err)
 		}
-		req.GetBody = replay.getBody(replay.start, 0, size, true)
+		req.GetBody = replay.getBody(replay.start, 0, size, true, wire)
 	}
 	// NewRequest only infers ContentLength for a few concrete reader types.
 	req.ContentLength = size
@@ -441,7 +444,7 @@ func (r *readerReplay) active() *uploadBody {
 // waits for net/http to close the previous body before seeking the shared
 // reader, matching the RoundTripper body-ownership contract.
 func (r *readerReplay) getBody(
-	start, offset, size int64, requireEOF bool,
+	start, offset, size int64, requireEOF bool, wire *wireProgressTracker,
 ) func() (io.ReadCloser, error) {
 	return func() (io.ReadCloser, error) {
 		r.mu.Lock()
@@ -454,7 +457,7 @@ func (r *readerReplay) getBody(
 		}
 		exact := newExactSizeReader(r.seeker, size, requireEOF)
 		exact.offset = offset
-		body := newUploadBody(exact)
+		body := newUploadBody(exact, wire)
 		r.current = body
 		return body, nil
 	}

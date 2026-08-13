@@ -11,6 +11,9 @@ type transferConfig struct {
 	// progress receives cumulative transfer counts; nil reports
 	// nothing.
 	progress func(done, total int64)
+	// wireProgress receives positive upload bytes consumed by the HTTP
+	// transport; nil disables accounting.
+	wireProgress func(delta int64)
 }
 
 // applyTransferOptions folds opts into a fresh per-call config.
@@ -40,5 +43,20 @@ func applyTransferOptions(opts []TransferOption) transferConfig {
 func WithProgress(fn func(done, total int64)) TransferOption {
 	return func(cfg *transferConfig) {
 		cfg.progress = fn
+	}
+}
+
+// WithWireProgress reports positive upload-byte deltas consumed by the HTTP
+// transport. It does not count source read-ahead. Failed attempts, redirects,
+// and transparent retries all contribute because they consumed boundary
+// traffic.
+//
+// Calls are serialized within one Push and stop before Push returns.
+// Concurrent transfers may call the same fn concurrently. fn runs
+// synchronously on the upload-body read path and must return quickly. A nil fn
+// disables reporting and its associated accounting.
+func WithWireProgress(fn func(delta int64)) TransferOption {
+	return func(cfg *transferConfig) {
+		cfg.wireProgress = fn
 	}
 }
