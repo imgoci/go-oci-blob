@@ -43,6 +43,7 @@ nav:
       - Enable chunked upload and parallel pull: how-to/tune-transfers.md
       - Refresh registry compatibility: how-to/refresh-registry-compatibility.md
   - Reference:
+      - Embedding API: reference/embedding.md
       - Registry compatibility: reference/registry-compatibility.md
   - Explanation:
       - Design: explanation/design.md

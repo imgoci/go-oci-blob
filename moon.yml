@@ -69,6 +69,13 @@ tasks:
     options:
       cache: false
 
+  test-race:
+    command: 'go test -race ./...'
+    inputs:
+      - '@group(goSources)'
+    options:
+      cache: false
+
   # Integration tests are build-tagged out of the plain test task; they
   # need a running Docker daemon for testcontainers.
   test-e2e:
@@ -84,6 +91,7 @@ tasks:
       - 'root:lint'
       - 'root:build'
       - 'root:test'
+      - 'root:test-race'
       - 'root:test-e2e'
       # Static and local-only harness maintenance; never contacts a hosted registry.
       - 'compat:check'

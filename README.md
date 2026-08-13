@@ -21,6 +21,8 @@ Documentation:
 
 - [Getting started tutorial](https://imgoci.github.io/go-oci-blob/tutorials/getting-started/)
 - [API reference](https://pkg.go.dev/github.com/imgoci/go-oci-blob)
+- [Embedding API](https://imgoci.github.io/go-oci-blob/reference/embedding/)
+  — retry ownership, error inspection, wire progress, and redirect policy
 - [Registry compatibility](https://imgoci.github.io/go-oci-blob/reference/registry-compatibility/)
   — verified behavior across nine registries
 - [Design](https://imgoci.github.io/go-oci-blob/explanation/design/)

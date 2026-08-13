@@ -138,12 +138,12 @@ wrapping the registry's `401` or `403` response.
 
 ## Off-origin storage requests
 
-No action is needed for registries that redirect blob downloads to a CDN or
-object store. The blob client routes off-origin requests around your
-registry transport and strips `Authorization`, cookies, and `Referer` before
-they leave the registry origin, so your credential is never replayed to
-storage. Set `blob.WithStorageTransport` only when the storage side itself
-needs special TLS, proxy, or authentication behavior.
+The blob client routes off-origin requests around your registry transport and
+removes `Authorization`, `Proxy-Authorization`, cookies, and `Referer` before
+they leave the registry origin. Set `blob.WithStorageTransport` when the
+storage side needs its own TLS, proxy, authentication, or destination policy.
+The library does not decide whether private or local addresses are safe for
+your application; enforce those restrictions in the storage transport.
 
 ## Troubleshooting
 
