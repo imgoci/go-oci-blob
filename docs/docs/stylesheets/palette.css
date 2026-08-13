@@ -33,3 +33,16 @@
   --md-footer-fg-color: #d9e3ec;
   --md-footer-fg-color--light: #b8c7d9;
 }
+
+/* Tables inside content tabs fill the tab panel instead of shrinking to
+   their content width. Both the table and Material's inline-block wrapper
+   need widening. */
+.md-typeset .tabbed-block .md-typeset__table {
+  display: block;
+  width: 100%;
+}
+
+.md-typeset .tabbed-block .md-typeset__table table:not([class]) {
+  display: table;
+  width: 100%;
+}
