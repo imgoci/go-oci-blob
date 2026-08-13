@@ -7,6 +7,8 @@ projects:
   sources:
     root: '.'
     docs: 'docs'
+    # A nested consumer module; its live campaigns remain manual.
+    compat: 'test'
 
   # Uncomment to auto-discover more projects as the repository grows.
   # globs:
