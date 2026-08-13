@@ -72,6 +72,7 @@ func interpretError(resp *http.Response) error {
 		status:     resp.StatusCode,
 		message:    message,
 		retryAfter: retryAfterDelay(resp.Header.Get("Retry-After"), time.Now()),
+		origin:     originOfResponse(resp),
 	}
 }
 
@@ -180,16 +181,19 @@ func parseDecimal(text string) (int64, error) {
 	return strconv.ParseInt(text, 10, 64)
 }
 
-// registryError is an error derived from a registry HTTP response.
+// registryError is an error derived from an HTTP response at a registry or
+// off-origin storage boundary.
 type registryError struct {
 	// status is the HTTP status code of the failed response.
 	status int
 	// message is the detail parsed from the OCI error body, or empty
 	// when the body was absent or not the OCI error shape.
 	message string
-	// retryAfter is the wait the registry asked for via Retry-After,
+	// retryAfter is the wait the peer asked for via Retry-After,
 	// or zero when it asked for none.
 	retryAfter time.Duration
+	// origin identifies whether the response came from the registry or storage.
+	origin responseOrigin
 }
 
 // Error renders the status and any parsed registry detail.
@@ -200,11 +204,19 @@ func (e *registryError) Error() string {
 	return fmt.Sprintf("registry returned %d %s", e.status, http.StatusText(e.status))
 }
 
-// Unwrap maps the response status onto the package's sentinel errors
-// so callers can branch with [errors.Is].
+// Unwrap maps registry-origin response statuses onto package sentinel errors.
 func (e *registryError) Unwrap() error {
-	if e.status == http.StatusNotFound {
-		return ErrNotFound
+	if e.origin != responseOriginRegistry {
+		return nil
 	}
-	return nil
+	switch e.status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return ErrUnauthorized
+	case http.StatusNotFound:
+		return ErrNotFound
+	case http.StatusRequestEntityTooLarge:
+		return ErrTooLarge
+	default:
+		return nil
+	}
 }

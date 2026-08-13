@@ -38,6 +38,16 @@ type registryOrigin struct {
 	port string
 }
 
+// responseOrigin identifies which transport boundary produced a response.
+type responseOrigin uint8
+
+const (
+	// responseOriginRegistry is the authenticated registry origin.
+	responseOriginRegistry responseOrigin = iota
+	// responseOriginStorage is an off-origin storage or CDN endpoint.
+	responseOriginStorage
+)
+
 // scopedTransport sends requests for the registry origin through the caller's
 // authenticated transport and every other origin through a separate storage
 // transport.
@@ -100,6 +110,21 @@ func normalizeOrigin(u *url.URL) (registryOrigin, bool) {
 	return registryOrigin{scheme: scheme, host: host, port: port}, true
 }
 
+// originOfResponse reports whether resp came from the marked registry origin.
+// Synthetic responses without request metadata retain the historical
+// registry-origin behavior.
+func originOfResponse(resp *http.Response) responseOrigin {
+	if resp == nil || resp.Request == nil {
+		return responseOriginRegistry
+	}
+	origin, marked := resp.Request.Context().Value(registryOriginKey{}).(registryOrigin)
+	target, validTarget := normalizeOrigin(resp.Request.URL)
+	if marked && validTarget && target != origin {
+		return responseOriginStorage
+	}
+	return responseOriginRegistry
+}
+
 // checkRedirect rejects method-changing redirects for registry writes and
 // otherwise applies net/http's default ten-hop limit.
 func checkRedirect(req *http.Request, via []*http.Request) error {
@@ -147,5 +172,5 @@ func (c *Client) doRegistryRequest(req *http.Request) (*http.Response, error) {
 // retaining the original registry origin for transport routing.
 func (c *Client) doLocationRequest(req *http.Request, originURL *url.URL) (*http.Response, error) {
 	// OCI registries are explicitly allowed to return absolute storage URLs.
-	return c.httpClient.Do(withRegistryOrigin(req, originURL))
+	return c.httpClient.Do(withRegistryOrigin(req, originURL)) //nolint:gosec // The registry selects the storage URL.
 }
