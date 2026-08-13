@@ -92,7 +92,8 @@ func retryableStatus(code int) bool {
 }
 
 // retryAfterDelay parses a Retry-After header, which carries either a
-// number of seconds or an HTTP date. Zero means no usable wish.
+// number of seconds or an HTTP date. Zero means no usable wish, which
+// includes a date that has already passed.
 func retryAfterDelay(header string, now time.Time) time.Duration {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -111,7 +112,7 @@ func retryAfterDelay(header string, now time.Time) time.Duration {
 		return time.Duration(1<<63 - 1)
 	}
 	if at, err := http.ParseTime(header); err == nil {
-		return at.Sub(now)
+		return max(at.Sub(now), 0)
 	}
 	return 0
 }
