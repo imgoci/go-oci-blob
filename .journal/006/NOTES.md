@@ -18,3 +18,9 @@ Proposed and got approval for a lean Diátaxis set: 1 tutorial, 2 new how-tos, 1
 Wrote and verified: tutorial executed verbatim via public go get + registry:2 (expected outputs pasted from real runs; caught a fabricated digest during verification); all how-to snippets extracted verbatim and compiled/vetted against oras-go v2.6.2 and go-containerregistry v0.21.9; oras auth adapter runtime-proven against htpasswd registry:2 (authed ok, unauthed 401); mkdocs --strict --locked build green.
 Compatibility reference transcribed from .journal/005/REGISTRY_TEST_RESULTS.md with dated verification identity and observed-limit notes; "PASS, observed" kept qualified via footnote.
 PR #26 squash-merged as 14c5063; all CI/CodeQL/Pages checks passed; worktree docs/user-docs removed.
+
+## 2026-08-12 20:40 — Matrix tabs experiment
+User asked for a multi-tab compatibility matrix experiment; PR must not be merged before their review.
+Implemented pymdownx.tabbed (alternate style) + per-registry tabs, each a narrow Feature|Result table with inline observed limits; added "Differences at a glance" to preserve cross-registry comparison.
+Verified: strict locked mkdocs build; browser-driven check of tab rendering/switching; DOM-extracted 180 cells diffed against merged matrix — zero mismatches.
+PR #27 open, awaiting user review. Worktree docs/matrix-tabs retained until verdict.
