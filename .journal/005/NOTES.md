@@ -231,3 +231,7 @@ The final live proof used only `git archive c369be36fe3ceca20bb7fcfdd9194edd54b0
 Final cleanup proof: exact archive, read-only and private-mode checks, actual password and Basic-auth sentinel scan, named-container removal, temporary-directory removal, clean feature worktree, and generated-binary audit all passed. No campaign resource remains.
 
 Next: PR #25 is ready for review. Do not merge or close session 005 without explicit user direction.
+
+## 2026-08-12 19:23 — PR #25 ready for review
+
+Marked PR #25 ready after the exact-archive live proof and all hosted checks passed. GitHub reports head `c369be36fe3ceca20bb7fcfdd9194edd54b0be72` mergeable with clean merge state. Await explicit review/merge direction.
