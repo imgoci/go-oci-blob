@@ -213,3 +213,11 @@ Calibration: A disposable authenticated TLS Distribution `registry:2.8.3` campai
 Verification: `root:check` passed all 14 Moon tasks, including tagged Registry/Zot E2E, strict docs, root build/test/lint, and nested consumer format/lint/build/unit/race. Nested `go mod tidy -diff`, `go mod verify`, `go vet`, uncached normal tests, and uncached race tests passed. Two independent final reviews found no remaining P0/P1 issue after the observer began distinguishing causal source-body errors from unrelated transport failures.
 
 Next: Finish exact-snapshot calibration, commit and publish `feat/registry-compat-harness`, open the GitHub PR, and await review. Keep session 005 open unless explicitly asked to close it.
+
+## 2026-08-12 19:18 — Final harness snapshot calibrated
+
+The final request-body-aware wire observer snapshot passed the full disposable TLS/authenticated Distribution `registry:2.8.3` campaign with pinned ORAS `1.3.3`. Fresh normal and race runs were both valid, the race run was clean, and the two-run aggregate again produced 17 `PASS`, three `N/A` (range fallback, off-origin scope, natural throttling), zero `NO`, and zero `BLOCKED`. Final evidence SHA-256 values: normal `7adf2c42ee5db66422e3ae48c0e6bd6b1ce07a6217613df8f9b0f5fbf258be20`; race `f272a73ff13380674ef98fc2c8955f2a47d478104e201bd8788364934f8abeb7`; aggregate `12274b871ecec1c066e2986cc48edfb8a75a8670eea16adcbdf543a602f51c7d`.
+
+Cleanup proof: mode-0600, actual credential and Basic-auth sentinel, read-only export, named-container removal, and temporary-directory audits passed. No compatibility container, `/tmp` campaign folder, generated binary, credential, fixture, or raw evidence remains in the active filesystem.
+
+Next: Commit and publish the feature branch and open its GitHub PR. Keep session 005 open unless explicitly asked to close it.
