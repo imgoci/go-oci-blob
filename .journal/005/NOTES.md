@@ -235,3 +235,11 @@ Next: PR #25 is ready for review. Do not merge or close session 005 without expl
 ## 2026-08-12 19:23 — PR #25 ready for review
 
 Marked PR #25 ready after the exact-archive live proof and all hosted checks passed. GitHub reports head `c369be36fe3ceca20bb7fcfdd9194edd54b0be72` mergeable with clean merge state. Await explicit review/merge direction.
+
+## 2026-08-12 19:48 — Registry compatibility harness merged
+
+Squash-merged PR #25 through GitHub with the reviewed head pinned to `c369be36fe3ceca20bb7fcfdd9194edd54b0be72`. The resulting `master` commit is `401ad8a5ab3a886107e1d974302cecbb18c3d545` (`test: add repeatable registry compatibility harness (#25)`). No branch protection was bypassed.
+
+Post-merge verification: the exact `401ad8a5ab3a886107e1d974302cecbb18c3d545` push passed CI, Go and Actions CodeQL, GitHub Pages, Release Please, and the dependency-graph update. Fast-forwarded the clean local `master`, confirmed it matches `origin/master`, and removed only the integrated `feat/registry-compat-harness` Worktrunk worktree and local branch. GitHub removed the remote feature branch. The main checkout remains clean.
+
+Next: Keep session 005 open unless explicitly asked to close it.
