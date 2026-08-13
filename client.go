@@ -190,11 +190,11 @@ func WithChunkedUpload(chunkSize int64) Option {
 }
 
 // WithTransport sets the [http.RoundTripper] used for requests to the
-// registry origin. This is the seam where registry authentication is
-// injected: pass an authenticated transport from a library such as
-// oras-go or go-containerregistry. Off-origin redirects and absolute
-// upload locations do not pass through this transport. A nil or typed-nil
-// transport keeps the library-managed default transport.
+// registry origin. This is the seam where callers inject registry
+// authentication, for example through oras-go or go-containerregistry.
+// The package does not acquire or store credentials. Off-origin redirects and
+// absolute upload locations do not pass through this transport. A nil or
+// typed-nil transport keeps the library-managed default transport.
 func WithTransport(rt http.RoundTripper) Option {
 	return func(o *options) {
 		if !isNilValue(rt) {
@@ -206,9 +206,11 @@ func WithTransport(rt http.RoundTripper) Option {
 
 // WithStorageTransport sets the [http.RoundTripper] used for off-origin
 // storage and CDN requests. It receives requests after registry credentials,
-// cookies, proxy credentials, and referrer data have been removed; use it for
-// storage-specific TLS, proxy, or authentication behavior. A nil or typed-nil
-// transport keeps the library-managed default transport.
+// cookies, proxy credentials, and referrer data have been removed. Callers use
+// this transport to enforce destination policy or supply storage-specific TLS,
+// proxy, or authentication behavior; the package does not block private or
+// local destinations itself. A nil or typed-nil transport keeps the
+// library-managed default transport.
 func WithStorageTransport(rt http.RoundTripper) Option {
 	return func(o *options) {
 		if !isNilValue(rt) {
@@ -220,8 +222,9 @@ func WithStorageTransport(rt http.RoundTripper) Option {
 
 // WithWriteRedirects controls whether redirects may reissue POST, PUT, PATCH,
 // or DELETE requests. The default permits method-preserving write redirects.
-// Disable them when an embedding application accepts only upload-session
-// Locations returned by successful registry responses.
+// When disabled, the client rejects the redirect before sending its target
+// request. Successful registry responses may still select an upload-session
+// Location; those values are not HTTP redirects.
 func WithWriteRedirects(allow bool) Option {
 	return func(o *options) {
 		o.writeRedirects = allow

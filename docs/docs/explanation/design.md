@@ -16,8 +16,11 @@ In scope:
 Out of scope:
 
 - Manifests, tags, referrers, and the rest of the OCI distribution spec.
-- Authentication. The caller injects an authenticated `http.RoundTripper`.
-  Libraries such as `oras-go` and `go-containerregistry` already provide them.
+- Authentication and credential storage. The caller injects an authenticated
+  registry `http.RoundTripper`; libraries such as `oras-go` and
+  `go-containerregistry` already provide one.
+- Storage destination policy. The caller can inject a separate guarded
+  transport for off-origin storage and CDN requests.
 - Signatures, attestations, and image tooling of any kind.
 
 Every line of code must serve blob transfer. When a feature request falls
@@ -69,9 +72,10 @@ type Repository struct {
 func New(opts ...Option) *Client
 
 // Client options: WithTransport(http.RoundTripper), WithStorageTransport(http.RoundTripper),
-//                 WithRetryPolicy(...), WithPlainHTTP(bool), WithChunkedUpload(chunkSize int64),
-//                 WithParallelPull(workers int, chunkSize int64)
-// Per-call options: WithProgress(fn func(done, total int64))
+//                 WithRetryPolicy(...), WithWriteRedirects(bool), WithPlainHTTP(bool),
+//                 WithChunkedUpload(chunkSize int64), WithParallelPull(workers int, chunkSize int64)
+// Per-call options: WithProgress(fn func(done, total int64)),
+//                   WithWireProgress(fn func(delta int64))
 
 func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest) (bool, error)
 func (c *Client) Pull(ctx context.Context, repo Repository, dgst digest.Digest, opts ...TransferOption) (io.ReadCloser, error)
@@ -99,16 +103,19 @@ API decisions:
   successful `206` responses. Further fragmentation returns an error instead
   of issuing more requests. `Pull` is the verified path; callers that need
   integrity on partial reads build it above the library.
-- Byte-moving calls take `WithProgress(fn)`. The callback receives cumulative
-  bytes moved and the total (`-1` when unknown), runs synchronously on the
-  transfer path, and must return quickly. Calls do not overlap within one
-  transfer, including a parallel Pull. Concurrent transfers may call the same
-  function at the same time, so callers must protect callback state shared
-  across transfers. Pull reports bytes delivered to the caller. Monolithic Push
-  reports after the final `201`; chunked Push advances after each PATCH
-  acknowledgement, so only a nil Push error proves the final commit succeeded.
-  A caller-side wrapper cannot report these consistently across transparent
-  retries and parallel workers.
+- `WithProgress(fn)` reports cumulative committed transfer progress. The
+  callback receives bytes moved and the total (`-1` when unknown), runs
+  synchronously on the transfer path, and must return quickly. Pull counts
+  bytes delivered to the caller. Monolithic Push reports after the final
+  `201`; chunked Push advances after each PATCH acknowledgement, so only a nil
+  Push error proves the final commit succeeded.
+- `WithWireProgress(fn)` reports positive upload-byte deltas when the HTTP
+  transport consumes a request body. Source read-ahead does not count. Failed
+  attempts, redirects, and transparent retries count because they consumed
+  boundary traffic. Calls stop before Push returns.
+- Calls to either progress callback do not overlap within one transfer.
+  Concurrent transfers may call the same function concurrently, so callers
+  must protect state shared across transfers.
 - `Mount` returns `(false, nil)` when the registry declines the mount. The
   caller then decides whether to push. Mount-with-automatic-push-fallback can
   be layered on later if real use shows the need.
@@ -134,24 +141,29 @@ Rules the client follows:
   full pull, `206 Partial Content` carries a validated range, `202 Accepted`
   opens or advances an upload session, and `201 Created` completes a commit or
   mount. An unexpected 2xx response is not promoted to a terminal success.
-- Resolve `Location` headers as relative or absolute URLs. Preserve the raw
-  query bytes because registries use opaque and sometimes signed session
-  parameters; append only the digest parameter required for commit.
+- Resolve `Location` headers as relative or absolute HTTP(S) URLs. Reject
+  missing, malformed, hostless, credential-bearing, unsupported-scheme, and
+  HTTPS-to-HTTP locations. Preserve opaque query bytes when appending or
+  replacing the digest parameter required for commit. Errors do not render the
+  peer-selected value, resolved URL, signed query, path, userinfo, or fragment.
 - Scope the caller's potentially authenticated registry transport to the
   registry origin. Absolute upload locations and cross-origin redirects use a
   separate storage transport with `Authorization`, `Proxy-Authorization`,
   cookies, and `Referer` removed. This routing happens before either transport
   runs, so an auth wrapper cannot add registry credentials to a storage
-  request or expose opaque session state through a redirect referrer.
-- Follow read redirects normally. A write redirect must preserve the method
-  and have a replayable body (`307` or `308`); reject redirects that would turn
-  a `POST`, `PUT`, or `PATCH` into a bodyless `GET` instead of accepting the
-  redirected `200` as upload success. Redirect targets must remain HTTP(S),
-  redirect loops stop at ten hops, and deterministic redirect-policy failures
-  are not retried as fresh upload sessions.
-- Parse the OCI error body (`{"errors": [...]}`) when present. When the body
-  is not that shape, fall back to the status code. A malformed error body is
-  never itself an error.
+  request. The caller's storage transport owns private-network and actual-peer
+  destination policy.
+- Follow read redirects normally. By default, a write redirect must preserve
+  the method and have a replayable body (`307` or `308`); redirects that would
+  turn a write into a bodyless `GET` are rejected. `WithWriteRedirects(false)`
+  rejects every redirect that would reissue `POST`, `PUT`, `PATCH`, or
+  `DELETE` before the target request is sent. Successful upload-session
+  `Location` responses remain accepted because they are protocol state, not
+  HTTP redirects. Redirect targets must remain HTTP(S), redirect loops stop at
+  ten hops, and redirect-policy failures are terminal.
+- Retain parsed OCI error status for programmatic inspection, but omit
+  registry response-body detail from ordinary rendered errors. A registry can
+  reflect credentials or terminal controls in that body.
 - Upload monolithically (single `PUT`) unless the caller sets
   `WithChunkedUpload`. Chunked upload is spec-optional and broken on major
   hosted registries (ECR discards chunks after the first and still returns
@@ -169,12 +181,19 @@ Rules the client follows:
 
 Retry policy:
 
-- Retry on connection errors, request timeouts, `429`, and `5xx`. Do not
-  retry other `4xx`; the request is wrong, not unlucky.
-- Exponential backoff with full jitter. Honor `Retry-After` when the registry
-  sends it, capped by the policy's maximum delay.
+- `New` applies [the default retry policy](https://pkg.go.dev/github.com/imgoci/go-oci-blob#DefaultRetryPolicy):
+  four total attempts, full-jitter backoff seeded at 250 milliseconds, and a
+  30-second maximum delay. `WithRetryPolicy(RetryPolicy{})` selects exactly one
+  attempt so an embedding orchestrator can own the outer retry budget.
+- Retry connection errors, request timeouts, registry `429`, and registry
+  `5xx`. Off-origin storage `401`, `403`, `404`, and `410` also warrant a fresh
+  upload attempt because the next registry session can select a new location.
+  Other `4xx` responses are terminal.
+- Preserve retry classification and the usable `Retry-After` floor on returned
+  errors. `Retryable(err)` exposes both after wrapping or policy exhaustion;
+  `StatusCode(err)` exposes a retained HTTP status.
 - `MaxAttempts` bounds the complete request, including parallel chunk body
-  retries; nested retry loops must not multiply it.
+  retries; nested retry loops do not multiply it.
 - The caller's `context` stops network work, retries, and backoff immediately
   and remains inspectable through `errors.Is` on the returned error. An
   arbitrary `io.Reader` has no cancellation operation, so `Push` still waits
@@ -203,14 +222,18 @@ Downloads resume; uploads restart:
 
 ## Errors
 
-Sentinel errors, kept few and high-level:
+Sentinel errors remain high-level:
 
-- `ErrNotFound`: the blob or repository does not exist.
+- `ErrNotFound`: the registry-origin blob or repository does not exist.
+- `ErrUnauthorized`: the registry origin returned `401` or `403`.
+- `ErrTooLarge`: the registry origin returned `413`.
 - `ErrDigestMismatch`: bytes did not hash to the expected digest.
 
-Everything else wraps the underlying HTTP or network error with enough context
-to debug. New sentinels are added when a caller demonstrates a need to branch
-on the condition, not before.
+Off-origin storage failures do not match registry authorization or not-found
+sentinels. `StatusCode` retains response status without requiring text parsing.
+`Retryable` retains retry classification and `Retry-After`. Ordinary error
+strings provide structural operation context but omit registry response-body
+details and peer-selected upload locations.
 
 ## Testing
 

@@ -36,6 +36,8 @@ inject an authenticated `http.RoundTripper`.
 
 - [API reference on pkg.go.dev](https://pkg.go.dev/github.com/imgoci/go-oci-blob)
   — the complete API contract lives in the package documentation.
+- [Embedding API](reference/embedding.md) — one-attempt retries, error
+  inspection, wire progress, redirect policy, and caller-owned boundaries.
 - [Registry compatibility](reference/registry-compatibility.md) — verified
   behavior across nine registries.
 
