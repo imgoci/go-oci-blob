@@ -5,9 +5,25 @@ the blob subset of the OCI distribution spec and nothing else: push, pull,
 existence checks, and cross-repository mounts, with retries and digest
 verification built in.
 
-The library is pre-release; the public API does not exist yet. The
-[design document](docs/docs/explanation/design.md) records the architecture
-and API direction.
+```sh
+go get github.com/imgoci/go-oci-blob
+```
+
+```go
+client := blob.New(blob.WithTransport(authenticatedTransport))
+repo := blob.Repository{Host: "registry.example.com", Name: "myorg/myrepo"}
+
+dgst := digest.FromBytes(data)
+err := client.Push(ctx, repo, dgst, int64(len(data)), bytes.NewReader(data))
+```
+
+Documentation:
+
+- [Getting started tutorial](https://imgoci.github.io/go-oci-blob/tutorials/getting-started/)
+- [API reference](https://pkg.go.dev/github.com/imgoci/go-oci-blob)
+- [Registry compatibility](https://imgoci.github.io/go-oci-blob/reference/registry-compatibility/)
+  — verified behavior across nine registries
+- [Design](https://imgoci.github.io/go-oci-blob/explanation/design/)
 
 Design constraints, in short:
 
