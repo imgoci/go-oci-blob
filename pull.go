@@ -76,8 +76,10 @@ func (c *Client) Pull(
 // library. When the registry ignores the Range header and answers
 // with the whole blob, PullRange discards the leading offset bytes
 // and caps the reader at length, so the reader serves the requested
-// window either way. A window that starts at or past the end of the
-// blob is an error.
+// window either way. Shorter valid portions are supported for up to
+// 16 successful partial responses; further fragmentation stops with
+// an error instead of issuing unbounded requests. A window that starts
+// at or past the end of the blob is an error.
 func (c *Client) PullRange(
 	ctx context.Context,
 	repo Repository,
@@ -265,6 +267,9 @@ type rangeReader struct {
 	// total is the representation size learned from Content-Range, or
 	// -1 when the registry ignored Range.
 	total int64
+	// parts counts successfully validated partial responses. It is zero
+	// when the registry ignored the Range header.
+	parts int
 	// closed prevents reads and response installation after Close.
 	closed bool
 }
@@ -281,8 +286,10 @@ func newRangeReader(
 ) *rangeReader {
 	readCtx, cancel := context.WithCancel(ctx)
 	next := int64(0)
+	parts := 0
 	if parsed.total >= 0 {
 		next = parsed.end + 1
+		parts = 1
 	}
 	return &rangeReader{
 		ctx:       readCtx,
@@ -295,6 +302,7 @@ func newRangeReader(
 		next:      next,
 		end:       end,
 		total:     parsed.total,
+		parts:     parts,
 	}
 }
 
@@ -395,7 +403,7 @@ func (r *rangeReader) advance() error {
 	body := r.body
 	r.body = nil
 	r.reader = nil
-	next, end, total := r.next, r.end, r.total
+	next, end, total, parts := r.next, r.end, r.total, r.parts
 	r.mu.Unlock()
 
 	if body != nil {
@@ -410,6 +418,11 @@ func (r *rangeReader) advance() error {
 	if total >= 0 && next >= total {
 		return fmt.Errorf("blob ended at byte %d before requested end byte %d: %w",
 			total, end, io.ErrUnexpectedEOF)
+	}
+	if parts == maxRangeParts {
+		return fmt.Errorf(
+			"registry split the requested range across more than %d successful partial responses",
+			maxRangeParts)
 	}
 
 	rangeHeader := fmt.Sprintf("bytes=%d-%d", next, end)
@@ -436,16 +449,25 @@ func (r *rangeReader) advance() error {
 			rangeHeader, total, parsed.total)
 	}
 
+	return r.installRangeContinuation(resp.Body, parsed, parts)
+}
+
+// installRangeContinuation adopts a validated partial response unless Close
+// won the race while the follow-up request was in flight.
+func (r *rangeReader) installRangeContinuation(
+	body io.ReadCloser, parsed contentRange, parts int,
+) error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		_ = resp.Body.Close()
+		_ = body.Close()
 		return io.ErrClosedPipe
 	}
-	r.body = resp.Body
-	r.reader = resp.Body
+	r.body = body
+	r.reader = body
 	r.remaining = parsed.end - parsed.start + 1
 	r.next = parsed.end + 1
+	r.parts = parts + 1
 	r.mu.Unlock()
 	return nil
 }

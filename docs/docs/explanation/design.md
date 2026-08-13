@@ -95,9 +95,10 @@ API decisions:
 - `PullRange` serves partial blobs through a ranged `GET`. It never verifies
   the digest: the digest covers the whole blob, so a partial body cannot be
   checked against it. The client therefore validates every `Content-Range`
-  before exposing bytes and follows shorter valid portions until it has the
-  requested window. `Pull` is the verified path; callers that need integrity
-  on partial reads build it above the library.
+  before exposing bytes and follows shorter valid portions through at most 16
+  successful `206` responses. Further fragmentation returns an error instead
+  of issuing more requests. `Pull` is the verified path; callers that need
+  integrity on partial reads build it above the library.
 - Byte-moving calls take `WithProgress(fn)`. The callback receives cumulative
   bytes moved and the total (`-1` when unknown), runs synchronously on the
   transfer path, and must return quickly. Calls do not overlap within one
@@ -181,15 +182,17 @@ Retry policy:
   the caller. A blocking producer must arrange to unblock its reader when the
   context ends.
 - Once an upload session will not be continued, send a best-effort `DELETE`
-  to its current location. Cleanup failure never replaces the original
-  transfer error.
+  while the caller's context remains active, with a five-second upper bound.
+  Cleanup failure never replaces the original transfer error.
 
 Downloads resume; uploads restart:
 
 - Download: on a broken stream, issue a ranged `GET` from the last verified
   byte, gated on the registry serving ranges (`Accept-Ranges` or a `206`
-  response). The digest state carries across the resume, so no bytes are
-  hashed twice.
+  response). A resume-time `416` with `Content-Range: bytes */N` is terminal
+  only when `N` exactly matches the delivered offset and any known total. The
+  digest state carries across every resume, and full digest verification still
+  decides whether the download succeeds.
 - Upload: a failed upload restarts from byte zero. The spec defines session
   resume (`GET` on the upload URL returns the received `Range`), but the
   registries that break chunked upload break resume with it, and no
