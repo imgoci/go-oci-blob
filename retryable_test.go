@@ -131,7 +131,7 @@ func TestRetryablePreservesOneAttemptFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runRetryablePush(t, tt.registryCode, tt.storageCode, tt.transportErr)
+			err := runRetryablePush(t, tt.registryCode, tt.storageCode, tt.transportErr, retryAfterHeaderSeconds)
 			wrapped := fmt.Errorf("embedding attempt: %w", fmt.Errorf("push failed: %w", err))
 
 			after, ok := blob.Retryable(wrapped)
@@ -146,6 +146,16 @@ func TestRetryablePreservesOneAttemptFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetryablePastHTTPDateRetryAfterReportsZeroDelay(t *testing.T) {
+	elapsed := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+	err := runRetryablePush(t, http.StatusServiceUnavailable, 0, nil, elapsed)
+	require.Error(t, err)
+
+	after, ok := blob.Retryable(fmt.Errorf("embedding attempt: %w", err))
+	assert.True(t, ok, "an elapsed Retry-After date must not change retry classification")
+	assert.Equal(t, time.Duration(0), after, "an elapsed Retry-After date requests no usable delay")
 }
 
 func TestRetryableRejectsTerminalFailures(t *testing.T) {
@@ -208,7 +218,7 @@ func TestRegistryAndStorageSentinels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runRetryablePush(t, tt.registryCode, tt.storageCode, nil)
+			err := runRetryablePush(t, tt.registryCode, tt.storageCode, nil, retryAfterHeaderSeconds)
 			require.Error(t, err)
 			if tt.wantSentinel != nil {
 				require.ErrorIs(t, err, tt.wantSentinel)
@@ -223,14 +233,21 @@ func TestRegistryAndStorageSentinels(t *testing.T) {
 	}
 }
 
-// runRetryablePush executes one upload attempt with the requested failure.
-func runRetryablePush(t *testing.T, registryCode, storageCode int, transportErr error) error {
+// retryAfterHeaderSeconds is the delay-seconds Retry-After served by
+// runRetryablePush unless a test needs a different value.
+const retryAfterHeaderSeconds = "7"
+
+// runRetryablePush executes one upload attempt with the requested failure,
+// serving retryAfterHeader as the Retry-After of every failing response.
+func runRetryablePush(
+	t *testing.T, registryCode, storageCode int, transportErr error, retryAfterHeader string,
+) error {
 	t.Helper()
 	const content = "retry classification"
 	var storage *httptest.Server
 	if storageCode != 0 {
 		storage = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("Retry-After", "7")
+			w.Header().Set("Retry-After", retryAfterHeader)
 			if req.Method == http.MethodDelete {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -246,7 +263,7 @@ func runRetryablePush(t *testing.T, registryCode, storageCode int, transportErr 
 			panic("transport errors do not use the registry server")
 		}
 		if registryCode != 0 {
-			w.Header().Set("Retry-After", "7")
+			w.Header().Set("Retry-After", retryAfterHeader)
 			w.WriteHeader(registryCode)
 			return
 		}
