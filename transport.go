@@ -171,6 +171,6 @@ func (c *Client) doRegistryRequest(req *http.Request) (*http.Response, error) {
 // doLocationRequest executes a request to a registry-provided Location while
 // retaining the original registry origin for transport routing.
 func (c *Client) doLocationRequest(req *http.Request, originURL *url.URL) (*http.Response, error) {
-	// OCI registries are explicitly allowed to return absolute storage URLs.
-	return c.httpClient.Do(withRegistryOrigin(req, originURL)) //nolint:gosec // The registry selects the storage URL.
+	// #nosec G704 -- OCI registries are allowed to select absolute storage URLs.
+	return c.httpClient.Do(withRegistryOrigin(req, originURL))
 }
