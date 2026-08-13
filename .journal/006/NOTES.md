@@ -31,3 +31,7 @@ Each step verified in live browser: DOM extraction (180 cells by icon class, 20 
 
 ## 2026-08-12 21:15 — PR #27 merged
 User approved the tabbed matrix. Squash-merged as 7453b75; preview server stopped; docs/matrix-tabs worktree and branch removed; local master synced.
+
+## 2026-08-12 21:30 — Close
+Correction: the 20:05 entry said the docs site is Docusaurus; it is MkDocs Material.
+Session closed. PR #26 (docs set, 14c5063) and PR #27 (tabbed matrix, 7453b75) are squash-merged; master synced at 7453b75; all post-merge workflows green; no implementation worktrees remain. SUMMARY.md written, INDEX row set complete, TECH_NOTES gained docs-site and matrix-presentation context. Largest open thread: the first tagged release (phase 8 remainder).
