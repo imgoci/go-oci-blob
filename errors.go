@@ -8,6 +8,14 @@ import "errors"
 // it.
 var ErrNotFound = errors.New("blob not found")
 
+// ErrUnauthorized reports that the registry origin rejected authorization.
+// Authentication failures from off-origin storage do not match this error.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// ErrTooLarge reports that the registry origin refused a blob because its
+// declared or transferred size exceeds a registry limit.
+var ErrTooLarge = errors.New("blob too large")
+
 // ErrDigestMismatch reports that transferred bytes did not hash to
 // the expected digest. The verifying reader returned by [Client.Pull]
 // yields it in place of [io.EOF] when the stream ends on content that

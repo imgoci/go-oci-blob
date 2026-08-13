@@ -104,21 +104,31 @@ func (c *Client) pushWithRetry(
 			return contextOperationError(ctx, err)
 		}
 		if !retryable || attempt == attempts {
-			return err
+			return terminalPushError(err, retryable)
 		}
 		if size > 0 {
 			if replay == nil {
-				return fmt.Errorf(
-					"%w (upload restart needs the bytes again, but the reader is not an io.Seeker)", err)
+				return markRetryable(fmt.Errorf(
+					"%w (upload restart needs the bytes again, but the reader is not an io.Seeker)", err),
+					retryAfterOf(err))
 			}
 			if rerr := replay.rewind(); rerr != nil {
 				return fmt.Errorf("rewinding reader to restart upload: %w (restart cause: %w)", rerr, err)
 			}
 		}
 		if sleepErr := sleepContext(ctx, c.retry.backoffDelay(attempt, retryAfterOf(err))); sleepErr != nil {
-			return fmt.Errorf("upload retry canceled: %w (last attempt: %w)", sleepErr, err)
+			return retryCanceledError(sleepErr, err)
 		}
 	}
+}
+
+// terminalPushError preserves retry metadata when an upload attempt budget is
+// exhausted.
+func terminalPushError(err error, retryable bool) error {
+	if !retryable {
+		return err
+	}
+	return markRetryable(err, retryAfterOf(err))
 }
 
 // pushOnce runs one POST+PUT monolithic upload attempt. The bool

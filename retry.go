@@ -182,7 +182,11 @@ func (c *Client) doRetryAttempt(
 		if ctx.Err() != nil {
 			return retryAttemptResult{err: contextOperationError(ctx, err)}
 		}
-		if !retryableRequestError(err) || last {
+		retryable := retryableRequestError(err)
+		if !retryable || last {
+			if retryable {
+				err = markRetryable(err, 0)
+			}
 			return retryAttemptResult{err: err}
 		}
 		return retryAttemptResult{retry: true, err: err}
@@ -199,16 +203,16 @@ func (c *Client) doRetryAttempt(
 // inspectable when a retry wait is interrupted.
 func retryCanceledError(cancelErr, lastErr error) error {
 	if lastErr != nil {
-		return fmt.Errorf("retry canceled: %w (last attempt: %w)", cancelErr, lastErr)
+		return markTerminal(fmt.Errorf("retry canceled: %w (last attempt: %w)", cancelErr, lastErr))
 	}
-	return fmt.Errorf("retry canceled: %w", cancelErr)
+	return markTerminal(fmt.Errorf("retry canceled: %w", cancelErr))
 }
 
 // contextOperationError keeps the caller's cancellation or deadline
 // inspectable while retaining the operation error that exposed it.
 func contextOperationError(ctx context.Context, operationErr error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("%w (operation failed with: %w)", ctxErr, operationErr)
+		return markTerminal(fmt.Errorf("%w (operation failed with: %w)", ctxErr, operationErr))
 	}
 	return operationErr
 }
