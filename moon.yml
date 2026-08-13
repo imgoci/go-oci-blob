@@ -17,6 +17,8 @@ toolchains:
 fileGroups:
   goSources:
     - '**/*.go'
+    # test/ is a separate Go module with its own maintenance tasks.
+    - '!test/**/*.go'
     - 'go.mod'
     - 'go.sum'
     # Tool/version pins. Under the `system` toolchain moon does not hash the Go
@@ -46,7 +48,7 @@ tasks:
       cache: false
 
   lint:
-    command: 'golangci-lint run --config .golangci.yml ./... --show-stats=false'
+    command: 'golangci-lint run --allow-serial-runners --config .golangci.yml ./... --show-stats=false'
     inputs:
       - '@group(goSources)'
       - '@group(lintConfig)'
@@ -83,6 +85,8 @@ tasks:
       - 'root:build'
       - 'root:test'
       - 'root:test-e2e'
+      # Static and local-only harness maintenance; never contacts a hosted registry.
+      - 'compat:check'
       - 'docs:build'
     inputs:
       - '@group(goSources)'

@@ -35,6 +35,8 @@ theme:
 
 nav:
   - Home: index.md
+  - How-to guides:
+      - Refresh registry compatibility: how-to/refresh-registry-compatibility.md
   - Explanation:
       - Design: explanation/design.md
 

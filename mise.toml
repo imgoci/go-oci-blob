@@ -28,6 +28,9 @@ python = "3.14.3"
 # only needed when regenerating them.
 "aqua:vektra/mockery" = "3.7.2"
 
+# Independent OCI Distribution control used by the manual compatibility runbook.
+"aqua:oras-project/oras" = "1.3.3"
+
 # Docs (MkDocs) toolchain — moved off moon's former unstable_python/unstable_uv.
 "aqua:astral-sh/uv" = "0.11.0"
 

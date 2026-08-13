@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "registry": {
+    "id": "registry-id",
+    "product": "Registry product",
+    "version": "exact service or product version",
+    "backend": "storage backend or hosted service",
+    "host": "registry.example.test:5443"
+  },
+  "run": {
+    "id": "registry-id-20260812-normal-unique",
+    "library_commit": "0000000000000000000000000000000000000000",
+    "source_repository": "compat/source-unique",
+    "destination_repository": "compat/destination-unique",
+    "work_dir": "./private-work",
+    "blocked_features": []
+  },
+  "tls": {
+    "ca_file": "./ca.pem"
+  },
+  "auth": {
+    "username": "disposable-user",
+    "password_file": "./registry-password",
+    "require_anonymous_denial": true
+  },
+  "oras": {
+    "binary": "oras",
+    "registry_config_file": "./oras-auth.json"
+  },
+  "seed": {
+    "file": "./seed.bin",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "parameters": {
+    "parallel_workers": 4,
+    "parallel_chunk_bytes": 262144,
+    "upload_chunk_bytes": 1048576,
+    "operation_timeout": "90s",
+    "campaign_timeout": "12m",
+    "absence_settle_time": "1s"
+  }
+}
