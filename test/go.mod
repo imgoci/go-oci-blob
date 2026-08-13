@@ -2,7 +2,7 @@
 // the same internal-package boundary faced by an independent consumer.
 module github.com/imgoci/go-oci-blob-compat
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/imgoci/go-oci-blob v0.0.0
