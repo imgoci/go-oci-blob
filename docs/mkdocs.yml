@@ -13,6 +13,7 @@ theme:
   language: en
   features:
     - content.action.edit
+    - content.tooltips
     - navigation.instant
     - navigation.tracking
     - search.highlight
