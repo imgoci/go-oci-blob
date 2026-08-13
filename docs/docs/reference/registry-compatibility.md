@@ -2,7 +2,8 @@
 
 Results of running one library test campaign against nine registries.
 Hosted-registry behavior can change at any time; treat each cell as a dated
-observation, not a permanent property.
+observation, not a permanent property. Hover over a feature name for what its
+row verified.
 
 ## Verification identity
 
@@ -18,101 +19,282 @@ observation, not a permanent property.
 The refresh procedure is
 [Refresh the registry compatibility matrix](../how-to/refresh-registry-compatibility.md).
 
-## Registries
-
-| Column | Registry |
-|---|---|
-| ECR | Amazon ECR Private |
-| GHCR | GitHub Container Registry |
-| Hub | Docker Hub |
-| gcr.io | The `gcr.io` URL served by Google Artifact Registry |
-| Quay | Quay.io |
-| ACR | Azure Container Registry |
-| Harbor | Harbor v2.15.2, self-hosted, filesystem storage |
-| GitLab | GitLab CE 19.2.1 native registry, self-hosted, filesystem storage |
-| Nexus | Sonatype Nexus Repository OSS 3.76.0, self-hosted, filesystem storage |
-
 ## Result labels
 
-| Label | Meaning |
-|---|---|
-| PASS | The feature worked and its result was independently verified. |
-| NO | The registry and library combination did not support the feature. |
-| N/A | The campaign did not exercise this path on this registry. |
+| Symbol | Label | Meaning |
+|---|---|---|
+| :material-check:{ .result-pass title="PASS" } | PASS | The feature worked and its result was independently verified. |
+| :material-close:{ .result-no title="NO" } | NO | The registry and library combination did not support the feature. |
+| :material-minus:{ .result-na title="N/A" } | N/A | The campaign did not exercise this path on this registry. |
 
-## Matrix
+## Differences at a glance
 
-| Feature | ECR | GHCR | Hub | gcr.io | Quay | ACR | Harbor | GitLab | Nexus |
-|---|---|---|---|---|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Small blob (about 1 KiB) | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval¹ | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS | PASS | PASS |
-| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS | PASS | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
-| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
-| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A | N/A | N/A |
-| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+Every registry passed authenticated reads, ranged and parallel pulls, resume,
+monolithic push, concurrency, and upload `Location` handling. The registries
+differ only here:
 
-¹ Observed behavior, not a documented registry guarantee: every registry
-served a pushed blob before any manifest referenced it, but a registry may
-garbage-collect unreferenced blobs at any time.
-
-## Observed limits
-
-### Empty blobs
-
-The zero-byte blob (`sha256:e3b0c4...b855`) is rejected or lost on four
-registries:
-
-- **ECR**: the commit returned `400 BLOB_UPLOAD_INVALID` because the upload
-  had no parts.
-- **GHCR**: `HEAD` reported the canonical empty digest as present, but a
-  zero-byte upload returned `404 BLOB_UNKNOWN`.
-- **gcr.io**: the zero-byte commit returned `400 Bad Request`.
-- **Quay.io**: the zero-byte `Push` succeeded and `Exists` reported true, but
-  every retrieval — library `Pull`, raw `GET`, and ORAS — returned `404`.
-
-### Chunked upload
-
-- **ECR**: advertised a 10 MiB minimum chunk length, acknowledged every
-  `PATCH`, and never made any tested chunked blob available.
-- **gcr.io**: accepted the first `PATCH` with `202` and answered the next
-  upload request with `405 Method Not Allowed`.
-
-### Nexus Repository OSS 3.76.0
-
-- **Wrong-digest rejection**: the commit returned `400` and `Push` returned
-  an error, but the claimed digest afterwards answered `HEAD 200` and served
-  bytes whose SHA-256 differs from it. A verified library `Pull` of that
-  digest returns `ErrDigestMismatch`.
-- **Exact-size rejection**: a reader with trailing data was rejected, but in
-  three of five campaigns the declared prefix was committed anyway.
-- **Cross-repository `Mount`**: the mount request between two hosted Docker
-  repositories returned `202`; `Mount` returns `(false, nil)` and the caller
-  falls back to `Push`.
-
-### Amazon ECR mount setting
+- **Empty blob `Push` and `Pull`** — rejected or lost on four registries: ECR
+  and `gcr.io` reject the zero-byte commit with `400`, GHCR reports the empty
+  digest present but answers uploads and reads with `404`, and Quay.io accepts
+  the push while every retrieval returns `404`.
+- **Chunked `Push`** — broken on ECR, which acknowledges every chunk and never
+  makes the blob available, and on `gcr.io`, which answers the second upload
+  request with `405`.
+- **Wrong-digest rejection, exact-size rejection, and cross-repository
+  `Mount`** — unsupported on Nexus Repository OSS 3.76.0: a wrong-digest
+  commit still becomes retrievable (a verified `Pull` of it returns
+  `ErrDigestMismatch`), a trailing-data upload can commit the declared prefix,
+  and mounts are declined so `Mount` returns `(false, nil)`.
 
 Cross-repository `Mount` on ECR requires the regional registry's
-`BLOB_MOUNTING` setting to be `ENABLED`. With mounting disabled, ECR declines
-the mount and `Mount` returns `(false, nil)`.
+`BLOB_MOUNTING` setting to be `ENABLED`; with it disabled, ECR declines the
+mount.
 
-### Paths no registry exercised
+Two paths produced no result anywhere: no registry ignored ranged requests
+(the parallel fallback never triggered) and none answered with `429` or `5xx`
+(retry after throttling was not observed).
 
-- **Parallel range-ignored fallback**: every registry served native ranged
-  requests, so the single-stream fallback never triggered. Deterministic
-  consumer tests cover the library path.
-- **Retry after registry throttling**: no campaign observed a `429` or `5xx`
-  response.
+## Results by registry
+
+=== "ECR"
+
+    Amazon ECR Private.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "GHCR"
+
+    GitHub Container Registry.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "Hub"
+
+    Docker Hub.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "gcr.io"
+
+    The `gcr.io` URL served by Google Artifact Registry.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "Quay"
+
+    Quay.io.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "ACR"
+
+    Azure Container Registry.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "Harbor"
+
+    Harbor v2.15.2, self-hosted, filesystem storage.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "GitLab"
+
+    GitLab CE 19.2.1 native registry, self-hosted, filesystem storage.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
+
+=== "Nexus"
+
+    Sonatype Nexus Repository OSS 3.76.0, self-hosted, filesystem storage.
+
+    | Feature | Result |
+    |---|:---:|
+    | <span title="The registry rejects unauthenticated /v2/ requests and accepts the campaign credential over HTTPS.">HTTPS and authentication</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Push and pull of a roughly 1 KiB blob, verified byte-for-byte against independent controls.">Small blob (about 1 KiB)</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Exists returns true for a stored digest and false, without an error, for a missing one.">`Exists`, present and missing</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Single-stream download returning exact bytes and a digest-verified end of stream.">Serial `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Progress counts are monotonic, end at the exact byte total, and do not overlap within one transfer.">Progress reporting</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Ranged reads return exact byte windows; past-end and EOF-crossing ranges are rejected.">`PullRange`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Concurrent ranged workers reassemble the blob in order through the same digest-verifying reader.">Parallel `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="When a registry ignores ranged requests, parallel Pull falls back to a single stream.">Parallel range-ignored fallback</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="A connection broken mid-body resumes with a ranged request and still returns exact bytes.">Interrupted `Pull` resume</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A pushed blob is retrievable before any manifest references it. Observed behavior, not a guarantee: a registry may garbage-collect unreferenced blobs at any time.">Unreferenced blob retrieval</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The default single-PUT upload, independently verified after commit.">Monolithic `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Uploading and retrieving the canonical zero-byte blob.">Empty blob `Push` and `Pull`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="The opt-in PATCH-chunked upload, committed and independently verified.">Chunked `Push`</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="A commit under a digest that does not match the uploaded bytes is rejected, and neither digest becomes retrievable.">Wrong-digest rejection</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="Readers yielding fewer or more bytes than the declared size are rejected without committing anything.">Exact-size rejection</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="Mounting an existing blob from a source repository into a destination repository without re-uploading it.">Cross-repository `Mount`</span> | :material-close:{ .result-no title="NO" } |
+    | <span title="Mixed concurrent operations on one shared client complete correctly under the race detector.">Shared-client concurrency</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="No registry Authorization, cookie, or Referer header follows a redirect to off-origin blob storage.">Off-origin redirect credential scope</span> | :material-minus:{ .result-na title="N/A" } |
+    | <span title="Upload sessions follow relative and absolute Location URLs, preserving their opaque query state.">Upload `Location` handling</span> | :material-check:{ .result-pass title="PASS" } |
+    | <span title="Automatic retry after a 429 or 5xx response from the registry.">Retry after registry throttling</span> | :material-minus:{ .result-na title="N/A" } |
