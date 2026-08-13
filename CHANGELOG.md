@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/imgoci/go-oci-blob/compare/v1.1.0...v1.1.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* clamp elapsed Retry-After dates to zero ([#35](https://github.com/imgoci/go-oci-blob/issues/35)) ([5eeca6d](https://github.com/imgoci/go-oci-blob/commit/5eeca6d701739bbe6624c95befc2f842af22db87))
+
 ## [1.1.0](https://github.com/imgoci/go-oci-blob/compare/v1.0.0...v1.1.0) (2026-08-13)
 
 
