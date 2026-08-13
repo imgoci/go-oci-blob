@@ -1,8 +1,7 @@
 # Design
 
 go-oci-blob is a Go library that uploads and downloads OCI blobs. That is the
-whole library. This page records the design before implementation and the
-reasoning behind it.
+whole library. This page records the design and the reasoning behind it.
 
 ## Scope
 
@@ -39,7 +38,8 @@ consumers.
 
 ## Architecture
 
-The library follows the repository's hexagonal rules (A1). The split:
+The library follows hexagonal architecture: business logic runs and tests
+without side effects, and all I/O sits behind ports. The split:
 
 - **Core (pure logic, no I/O):** request planning, response interpretation,
   retry decisions, chunking, and digest bookkeeping. This code runs and tests
@@ -51,12 +51,13 @@ The library follows the repository's hexagonal rules (A1). The split:
   and hands the response back to the core.
 
 The public surface is one package, `blob`. Internal helpers move to `internal/`
-packages when a file nears the 1,000-line cap (R2), not before.
+packages when a file nears the repository's 1,000-line cap, not before.
 
-## Public API sketch
+## Public API
 
-Shapes below are a starting point, not a contract. Expect them to change as
-prototypes land.
+The authoritative API contract is the
+[package documentation](https://pkg.go.dev/github.com/imgoci/go-oci-blob).
+The shape, for orientation:
 
 ```go
 // Repository addresses a blob store: a registry host plus a repository name.
@@ -82,7 +83,7 @@ func (c *Client) Mount(ctx context.Context, dst, src Repository, dgst digest.Dig
 API decisions:
 
 - `Pull` returns an `io.ReadCloser` instead of writing to an `io.Writer`. A
-  reader composes with more caller code and never buffers the blob (P2). The
+  reader composes with more caller code and never buffers the blob. The
   reader verifies the digest as bytes flow; the final `Read` returns
   `ErrDigestMismatch` instead of `io.EOF` when the hash does not match.
 - `Push` requires the digest and size up front. Registries need the digest to
@@ -199,7 +200,7 @@ Downloads resume; uploads restart:
 
 ## Errors
 
-Sentinel errors (E1), kept few and high-level:
+Sentinel errors, kept few and high-level:
 
 - `ErrNotFound`: the blob or repository does not exist.
 - `ErrDigestMismatch`: bytes did not hash to the expected digest.
@@ -210,7 +211,7 @@ on the condition, not before.
 
 ## Testing
 
-Three layers (T1):
+Three layers:
 
 1. Unit tests on the pure core: response interpretation, retry decisions,
    range math, digest bookkeeping.
@@ -225,7 +226,7 @@ scripted-conversation suite is the largest of the three.
 
 ## Performance
 
-- Stream everything. No code path holds a whole blob in memory (P2).
+- Stream everything. No code path holds a whole blob in memory.
 - Upload request bodies stage up to four 256 KiB batches. This removes a
   scheduler handoff for every small transport read while preserving prompt
   `Close` and caller-reader ownership. Small bodies allocate proportionally;

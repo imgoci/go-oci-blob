@@ -35,8 +35,14 @@ theme:
 
 nav:
   - Home: index.md
+  - Tutorials:
+      - Push and pull your first blob: tutorials/getting-started.md
   - How-to guides:
+      - Authenticate to a registry: how-to/authenticate.md
+      - Enable chunked upload and parallel pull: how-to/tune-transfers.md
       - Refresh registry compatibility: how-to/refresh-registry-compatibility.md
+  - Reference:
+      - Registry compatibility: reference/registry-compatibility.md
   - Explanation:
       - Design: explanation/design.md
 
