@@ -8,3 +8,4 @@
 | 004 | 2026-08-11 | Apply verified transfer performance fixes | complete | Removed transfer hot-path bottlenecks, proved network-limited operating ranges, and merged the verified fixes in PR #21. |
 | 005 | 2026-08-11 | Full-corpus functional and registry compatibility validation | complete | Validated the complete consumer contract, characterized nine registries, fixed progress semantics, and merged a repeatable compatibility harness. |
 | 006 | 2026-08-12 | User documentation set and tabbed compatibility matrix | complete | Shipped the execution-verified Diátaxis documentation set in PR #26 and reworked the compatibility reference into tabs, icons, and tooltips in PR #27. |
+| 007 | 2026-08-13 | Remediate upstream requirements | in-progress | Assess the upstream requirements and propose a repository-grounded remediation plan for human review. |
