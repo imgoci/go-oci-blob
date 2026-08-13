@@ -25,7 +25,7 @@ import (
 // registry that drops chunks does so deterministically.
 func (c *Client) chunkedOnce(
 	ctx context.Context, repo Repository, dgst digest.Digest, size int64, r io.Reader,
-	tracker *progressTracker, replay *readerReplay,
+	tracker *progressTracker, replay *readerReplay, wire *wireProgressTracker,
 ) (bool, error) {
 	session, retryable, err := c.openSession(ctx, repo, dgst.Algorithm())
 	if err != nil {
@@ -44,7 +44,7 @@ func (c *Client) chunkedOnce(
 	for offset := int64(0); offset < size; {
 		n := min(chunk, size-offset)
 		finalChunk := offset+n == size
-		chunkRetryable, chunkErr := c.patchChunk(ctx, session, r, offset, n, finalChunk, replay)
+		chunkRetryable, chunkErr := c.patchChunk(ctx, session, r, offset, n, finalChunk, replay, wire)
 		if chunkErr != nil {
 			return chunkRetryable, chunkErr
 		}
@@ -52,7 +52,7 @@ func (c *Client) chunkedOnce(
 		// The ack verified this chunk advanced the upload session.
 		tracker.set(offset)
 	}
-	retryable, err = c.commitUpload(ctx, session, dgst, 0, http.NoBody, nil)
+	retryable, err = c.commitUpload(ctx, session, dgst, 0, http.NoBody, nil, wire)
 	if err != nil {
 		return retryable, err
 	}
@@ -65,10 +65,10 @@ func (c *Client) chunkedOnce(
 // and moves the session to the Location the response names.
 func (c *Client) patchChunk(
 	ctx context.Context, session *uploadSession, r io.Reader, offset, n int64,
-	final bool, replay *readerReplay,
+	final bool, replay *readerReplay, wire *wireProgressTracker,
 ) (bool, error) {
 	end := offset + n - 1
-	req, initialBody, err := newPatchRequest(ctx, session, r, offset, n, final, replay)
+	req, initialBody, err := newPatchRequest(ctx, session, r, offset, n, final, replay, wire)
 	if err != nil {
 		return false, err
 	}
@@ -148,6 +148,7 @@ func newPatchRequest(
 	offset, n int64,
 	final bool,
 	replay *readerReplay,
+	wire *wireProgressTracker,
 ) (*http.Request, *uploadBody, error) {
 	end := offset + n - 1
 	var start int64
@@ -161,7 +162,7 @@ func newPatchRequest(
 	}
 	exact := newExactSizeReader(r, n, final)
 	exact.offset = offset
-	body := newUploadBody(exact)
+	body := newUploadBody(exact, wire)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, session.url.String(), body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("building chunk request: %w", err)
@@ -170,7 +171,7 @@ func newPatchRequest(
 		if err := replay.register(body); err != nil {
 			return nil, nil, fmt.Errorf("registering chunk %d-%d request body: %w", offset, end, err)
 		}
-		req.GetBody = replay.getBody(start, offset, n, final)
+		req.GetBody = replay.getBody(start, offset, n, final, wire)
 	}
 	req.ContentLength = n
 	req.Header.Set("Content-Type", "application/octet-stream")
