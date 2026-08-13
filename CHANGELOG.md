@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/imgoci/go-oci-blob/compare/v1.0.0...v1.1.0) (2026-08-13)
+
+
+### Features
+
+* expose retry and registry error metadata ([#30](https://github.com/imgoci/go-oci-blob/issues/30)) ([fb05287](https://github.com/imgoci/go-oci-blob/commit/fb052878ee41b803fa5799bc04df9bb164b8fdf9))
+* harden upload destinations and redirects ([#32](https://github.com/imgoci/go-oci-blob/issues/32)) ([a741861](https://github.com/imgoci/go-oci-blob/commit/a74186131e9c8ff4d1b91d3b2415f7044843695c))
+* report upload wire consumption ([#33](https://github.com/imgoci/go-oci-blob/issues/33)) ([92cdbb0](https://github.com/imgoci/go-oci-blob/commit/92cdbb042e32a88a17f41c41067ab44d0714abeb))
+
 ## 1.0.0 (2026-08-13)
 
 
