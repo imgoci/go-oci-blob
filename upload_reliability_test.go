@@ -118,9 +118,9 @@ func (r *gatedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	return r.reader.Seek(offset, whence)
 }
 
-// TestClientPushPreservesCancellationIdentity verifies that a transport error
-// cannot hide the caller's cancellation and cleanup still gets its own window.
-func TestClientPushPreservesCancellationIdentity(t *testing.T) {
+// TestClientPushCancellationStopsCleanupNetworkWork verifies caller
+// cancellation prevents abandoned-session cleanup from reaching the transport.
+func TestClientPushCancellationStopsCleanupNetworkWork(t *testing.T) {
 	const content = "cancel this upload"
 	transportErr := errors.New("connection refused")
 	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
@@ -144,12 +144,39 @@ func TestClientPushPreservesCancellationIdentity(t *testing.T) {
 			cancel()
 			return nil, transportErr
 		}).Once()
-	expectDelete(tc, sessionURL)
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseDelete) }) })
+	tc.transport.EXPECT().
+		RoundTrip(mock.MatchedBy(func(req *http.Request) bool {
+			return req.Method == http.MethodDelete
+		})).
+		RunAndReturn(func(*http.Request) (*http.Response, error) {
+			close(deleteStarted)
+			<-releaseDelete
+			return response(http.StatusNoContent, ""), nil
+		}).Maybe()
 
-	err := tc.client.Push(ctx, repo, dgst, int64(len(content)), strings.NewReader(content))
+	result := make(chan error, 1)
+	go func() {
+		result <- tc.client.Push(ctx, repo, dgst, int64(len(content)), strings.NewReader(content))
+	}()
 
-	require.ErrorIs(t, err, context.Canceled)
-	require.ErrorIs(t, err, transportErr)
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, transportErr)
+		select {
+		case <-deleteStarted:
+			t.Fatal("cleanup DELETE started after caller cancellation")
+		default:
+		}
+	case <-deleteStarted:
+		releaseOnce.Do(func() { close(releaseDelete) })
+		<-result
+		t.Fatal("cleanup DELETE started before canceled Push returned")
+	}
 }
 
 // TestClientExistsPreservesContextIdentity checks cancellation and deadline
@@ -406,7 +433,6 @@ func TestClientPushCancellationPreservesBlockedSourceOwnership(t *testing.T) {
 			close(closeReturned)
 			return nil, errors.New("connection reset")
 		}).Once()
-	expectDelete(tc, sessionURL)
 	result := make(chan error, 1)
 	go func() {
 		result <- tc.client.Push(ctx, repo, dgst, 1, source)

@@ -491,13 +491,16 @@ func responseRequestURL(resp *http.Response, fallback *url.URL) *url.URL {
 	return fallback
 }
 
-// cancelUploadSession deletes an abandoned upload session. It keeps request
-// values but outlives caller cancellation long enough to clean up registry
-// state. Callers with a primary upload failure may intentionally ignore the
-// returned cleanup error.
+// cancelUploadSession deletes an abandoned upload session while the caller's
+// context remains active. A five-second timeout bounds the best-effort cleanup.
+// Callers with a primary upload failure may intentionally ignore the returned
+// cleanup error.
 func (c *Client) cancelUploadSession(ctx context.Context, session *uploadSession) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("canceling upload session: %w", err)
+	}
 	const timeout = 5 * time.Second
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	cleanupCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(cleanupCtx, http.MethodDelete, session.url.String(), nil)
 	if err != nil {

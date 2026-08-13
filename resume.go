@@ -349,9 +349,10 @@ func (r *resumeReader) requestResume(offset int64) (*http.Response, error) {
 	return resp, nil
 }
 
-// validateResumeResponse verifies the replacement begins at offset
-// or positions a full-body fallback at that byte. A partial body is capped at
-// its advertised interval so excess bytes cannot cross a response boundary.
+// validateResumeResponse verifies a replacement begins at offset, positions a
+// full-body fallback at that byte, or confirms terminal EOF with an exact 416
+// total. A partial body is capped at its advertised interval so excess bytes
+// cannot cross a response boundary.
 func (r *resumeReader) validateResumeResponse(
 	resp *http.Response, offset int64, cause error,
 ) (resumeResponse, error) {
@@ -382,6 +383,8 @@ func (r *resumeReader) validateResumeResponse(
 			total: parsed.total,
 			end:   parsed.end + 1,
 		}, nil
+	case http.StatusRequestedRangeNotSatisfiable:
+		return r.validateTerminalResumeResponse(resp, offset)
 	case http.StatusOK:
 		if _, err := io.CopyN(io.Discard, resp.Body, offset); err != nil {
 			_ = resp.Body.Close()
@@ -411,6 +414,33 @@ func (r *resumeReader) validateResumeResponse(
 		return resumeResponse{}, fmt.Errorf("resuming blob download at byte %d (cause: %w): %w",
 			offset, cause, responseErr)
 	}
+}
+
+// validateTerminalResumeResponse accepts a 416 as EOF evidence only when its
+// unsatisfied-range total matches the delivered offset and any known total.
+func (r *resumeReader) validateTerminalResumeResponse(
+	resp *http.Response, offset int64,
+) (resumeResponse, error) {
+	header := resp.Header.Get("Content-Range")
+	total := unsatisfiedRangeTotal(header)
+	drainAndClose(resp.Body)
+	if total < 0 {
+		return resumeResponse{}, fmt.Errorf(
+			"resuming blob download at byte %d: registry returned invalid Content-Range %q",
+			offset, header)
+	}
+	if total != offset {
+		return resumeResponse{}, fmt.Errorf(
+			"resuming blob download at byte %d: registry reported unsatisfied range total %d",
+			offset, total)
+	}
+	knownTotal := r.knownTotal()
+	if knownTotal >= 0 && total != knownTotal {
+		return resumeResponse{}, fmt.Errorf(
+			"resuming blob download at byte %d: blob size changed from %d to %d",
+			offset, knownTotal, total)
+	}
+	return resumeResponse{body: http.NoBody, total: total, end: total}, nil
 }
 
 // knownTotal returns the representation length learned from an earlier 206.

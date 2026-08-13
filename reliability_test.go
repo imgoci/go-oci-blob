@@ -6,8 +6,10 @@ package blob_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -587,4 +589,114 @@ func TestPushRestart(t *testing.T) {
 
 		require.Error(t, err)
 	})
+}
+
+// terminal416TestServer records the two-request broken-framing conversation.
+type terminal416TestServer struct {
+	// server serves the initial broken chunked body and terminal 416.
+	server *httptest.Server
+	// requests counts every GET in the conversation.
+	requests atomic.Int32
+	// resumeRange records the range used for the second GET.
+	resumeRange atomic.Value
+}
+
+// newTerminal416TestServer creates a real HTTP/1 server whose first response
+// carries all bytes but omits the terminal zero chunk.
+func newTerminal416TestServer(
+	t *testing.T, content string, total int,
+) *terminal416TestServer {
+	t.Helper()
+	flow := &terminal416TestServer{}
+	flow.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch flow.requests.Add(1) {
+		case 1:
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "response writer cannot hijack", http.StatusInternalServerError)
+				return
+			}
+			conn, writer, err := hijacker.Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = fmt.Fprintf(writer,
+				"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n",
+				len(content), content)
+			_ = writer.Flush()
+		case 2:
+			flow.resumeRange.Store(req.Header.Get("Range"))
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		default:
+			http.Error(w, "unexpected extra request", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(flow.server.Close)
+	return flow
+}
+
+// TestPullAcceptsTerminal416AfterCompleteBrokenChunkedBody verifies an exact
+// resume total can establish EOF without replacing digest verification.
+func TestPullAcceptsTerminal416AfterCompleteBrokenChunkedBody(t *testing.T) {
+	content := "complete payload with broken chunk framing"
+	matchingDigest := digest.FromString(content)
+
+	tests := []struct {
+		name      string
+		dgst      digest.Digest
+		total     int
+		wantError bool
+		errorIs   error
+	}{
+		{
+			name:  "accepts exact total as terminal EOF evidence",
+			dgst:  matchingDigest,
+			total: len(content),
+		},
+		{
+			name:      "still rejects a digest mismatch",
+			dgst:      digest.FromString("different content"),
+			total:     len(content),
+			wantError: true,
+			errorIs:   blob.ErrDigestMismatch,
+		},
+		{
+			name:      "rejects a total different from the delivered offset",
+			dgst:      matchingDigest,
+			total:     len(content) - 1,
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := newTerminal416TestServer(t, content, tt.total)
+			repo := blob.Repository{
+				Host: strings.TrimPrefix(flow.server.URL, "http://"),
+				Name: "library/ubuntu",
+			}
+			client := blob.New(
+				blob.WithPlainHTTP(true),
+				blob.WithRetryPolicy(blob.RetryPolicy{MaxAttempts: 2}),
+			)
+
+			rc, err := client.Pull(t.Context(), repo, tt.dgst)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			if tt.wantError {
+				require.Error(t, err)
+				if tt.errorIs != nil {
+					require.ErrorIs(t, err, tt.errorIs)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, rc.Close())
+			assert.Equal(t, content, string(got))
+			assert.Equal(t, int32(2), flow.requests.Load())
+			assert.Equal(t, fmt.Sprintf("bytes=%d-", len(content)), flow.resumeRange.Load())
+		})
+	}
 }

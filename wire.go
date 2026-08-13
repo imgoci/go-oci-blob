@@ -148,6 +148,24 @@ func parseContentRange(header string) (contentRange, bool) {
 	return contentRange{start: start, end: end, total: total}, true
 }
 
+// unsatisfiedRangeTotal parses "bytes */<total>" from a 416 response. A
+// malformed or non-byte value returns -1.
+func unsatisfiedRangeTotal(header string) int64 {
+	unit, rest, found := strings.Cut(strings.TrimSpace(header), " ")
+	if !found || !strings.EqualFold(unit, "bytes") {
+		return -1
+	}
+	interval, totalText, found := strings.Cut(rest, "/")
+	if !found || interval != "*" {
+		return -1
+	}
+	total, err := parseDecimal(totalText)
+	if err != nil {
+		return -1
+	}
+	return total
+}
+
 // parseDecimal parses the HTTP grammar's non-empty DIGIT sequence
 // without accepting signs or surrounding whitespace.
 func parseDecimal(text string) (int64, error) {

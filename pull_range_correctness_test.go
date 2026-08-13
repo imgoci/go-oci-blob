@@ -3,10 +3,12 @@ package blob_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
@@ -199,6 +201,89 @@ func TestPullRangeIgnoredRangePreservesContextCancellation(t *testing.T) {
 
 			require.ErrorIs(t, err, context.Canceled)
 			assert.Nil(t, rc)
+		})
+	}
+}
+
+// TestPullRangeBoundsShortPartialResponses verifies successful fragments are
+// bounded independently from each fragment's retry budget.
+func TestPullRangeBoundsShortPartialResponses(t *testing.T) {
+	repo := blob.Repository{Host: "registry.example.com", Name: "library/ubuntu"}
+	content := "0123456789abcdefg"
+	dgst := digest.FromString(content)
+
+	tests := []struct {
+		name              string
+		length            int64
+		maxAttempts       int
+		retryContinuation bool
+		wantCalls         int
+		wantData          string
+		wantError         bool
+	}{
+		{
+			name:        "accepts sixteen successful portions",
+			length:      16,
+			maxAttempts: 1,
+			wantCalls:   16,
+			wantData:    content[:16],
+		},
+		{
+			name:        "rejects a seventeenth successful portion",
+			length:      17,
+			maxAttempts: 1,
+			wantCalls:   16,
+			wantData:    content[:16],
+			wantError:   true,
+		},
+		{
+			name:              "retains retries for an allowed continuation",
+			length:            2,
+			maxAttempts:       2,
+			retryContinuation: true,
+			wantCalls:         3,
+			wantData:          content[:2],
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var start, end int64
+				n, err := fmt.Sscanf(req.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+				require.NoError(t, err)
+				require.Equal(t, 2, n)
+				require.LessOrEqual(t, start, end)
+				if tt.retryContinuation && calls == 2 {
+					return response(http.StatusServiceUnavailable, ""), nil
+				}
+				return partialRangeResponse(
+					content[start:start+1],
+					fmt.Sprintf("bytes %d-%d/%d", start, start, len(content)),
+				), nil
+			})
+			client := blob.New(
+				blob.WithTransport(transport),
+				blob.WithRetryPolicy(blob.RetryPolicy{
+					MaxAttempts:  tt.maxAttempts,
+					InitialDelay: time.Nanosecond,
+					MaxDelay:     time.Nanosecond,
+				}),
+			)
+
+			rc, err := client.PullRange(t.Context(), repo, dgst, 0, tt.length)
+			require.NoError(t, err)
+			got, err := io.ReadAll(rc)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, rc.Close())
+			assert.Equal(t, tt.wantData, string(got))
+			assert.Equal(t, tt.wantCalls, calls)
 		})
 	}
 }
