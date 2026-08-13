@@ -20,11 +20,11 @@ The refresh procedure is
 
 ## Result labels
 
-| Label | Meaning |
-|---|---|
-| PASS | The feature worked and its result was independently verified. |
-| NO | The registry and library combination did not support the feature. |
-| N/A | The campaign did not exercise this path on this registry. |
+| Symbol | Label | Meaning |
+|---|---|---|
+| :material-check:{ .result-pass title="PASS" } | PASS | The feature worked and its result was independently verified. |
+| :material-close:{ .result-no title="NO" } | NO | The registry and library combination did not support the feature. |
+| :material-minus:{ .result-na title="N/A" } | N/A | The campaign did not exercise this path on this registry. |
 
 ## Differences at a glance
 
@@ -53,27 +53,27 @@ registry may garbage-collect unreferenced blobs at any time.
     Amazon ECR Private.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | NO |
-    | Chunked `Push` | NO |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | PASS |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-close:{ .result-no title="NO" } |
+    | Chunked `Push` | :material-close:{ .result-no title="NO" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-check:{ .result-pass title="PASS" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
     **Empty blob Push and Pull**: The commit returned `400 BLOB_UPLOAD_INVALID` because the upload had no parts.
 
@@ -87,27 +87,27 @@ registry may garbage-collect unreferenced blobs at any time.
     GitHub Container Registry.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | NO |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | PASS |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-close:{ .result-no title="NO" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-check:{ .result-pass title="PASS" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
     **Empty blob Push and Pull**: `HEAD` reported the canonical empty digest as present, but a zero-byte upload returned `404 BLOB_UNKNOWN`.
 
@@ -117,54 +117,54 @@ registry may garbage-collect unreferenced blobs at any time.
     Docker Hub.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | PASS |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | PASS |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-check:{ .result-pass title="PASS" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
 === "gcr.io"
 
     The `gcr.io` URL served by Google Artifact Registry.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | NO |
-    | Chunked `Push` | NO |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | N/A |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-close:{ .result-no title="NO" } |
+    | Chunked `Push` | :material-close:{ .result-no title="NO" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-minus:{ .result-na title="N/A" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
     **Empty blob Push and Pull**: The zero-byte commit returned `400 Bad Request`.
 
@@ -176,27 +176,27 @@ registry may garbage-collect unreferenced blobs at any time.
     Quay.io.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | NO |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | PASS |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-close:{ .result-no title="NO" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-check:{ .result-pass title="PASS" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
     **Empty blob Push and Pull**: The zero-byte `Push` succeeded and `Exists` reported true, but every retrieval — library `Pull`, raw `GET`, and ORAS — returned `404`.
 
@@ -206,108 +206,108 @@ registry may garbage-collect unreferenced blobs at any time.
     Azure Container Registry.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | PASS |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | PASS |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-check:{ .result-pass title="PASS" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
 === "Harbor"
 
     Harbor v2.15.2, self-hosted, filesystem storage.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | PASS |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | N/A |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-minus:{ .result-na title="N/A" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
 === "GitLab"
 
     GitLab CE 19.2.1 native registry, self-hosted, filesystem storage.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | PASS |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | PASS |
-    | Exact-size rejection | PASS |
-    | Cross-repository `Mount` | PASS |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | N/A |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-check:{ .result-pass title="PASS" } |
+    | Exact-size rejection | :material-check:{ .result-pass title="PASS" } |
+    | Cross-repository `Mount` | :material-check:{ .result-pass title="PASS" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-minus:{ .result-na title="N/A" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
 === "Nexus"
 
     Sonatype Nexus Repository OSS 3.76.0, self-hosted, filesystem storage.
 
     | Feature | Result |
-    |---|---|
-    | HTTPS and authentication | PASS |
-    | Small blob (about 1 KiB) | PASS |
-    | `Exists`, present and missing | PASS |
-    | Serial `Pull` | PASS |
-    | Progress reporting | PASS |
-    | `PullRange` | PASS |
-    | Parallel `Pull` | PASS |
-    | Parallel range-ignored fallback | N/A |
-    | Interrupted `Pull` resume | PASS |
-    | Unreferenced blob retrieval¹ | PASS |
-    | Monolithic `Push` | PASS |
-    | Empty blob `Push` and `Pull` | PASS |
-    | Chunked `Push` | PASS |
-    | Wrong-digest rejection | NO |
-    | Exact-size rejection | NO |
-    | Cross-repository `Mount` | NO |
-    | Shared-client concurrency | PASS |
-    | Off-origin redirect credential scope | N/A |
-    | Upload `Location` handling | PASS |
-    | Retry after registry throttling | N/A |
+    |---|:---:|
+    | HTTPS and authentication | :material-check:{ .result-pass title="PASS" } |
+    | Small blob (about 1 KiB) | :material-check:{ .result-pass title="PASS" } |
+    | `Exists`, present and missing | :material-check:{ .result-pass title="PASS" } |
+    | Serial `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Progress reporting | :material-check:{ .result-pass title="PASS" } |
+    | `PullRange` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Parallel range-ignored fallback | :material-minus:{ .result-na title="N/A" } |
+    | Interrupted `Pull` resume | :material-check:{ .result-pass title="PASS" } |
+    | Unreferenced blob retrieval¹ | :material-check:{ .result-pass title="PASS" } |
+    | Monolithic `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Empty blob `Push` and `Pull` | :material-check:{ .result-pass title="PASS" } |
+    | Chunked `Push` | :material-check:{ .result-pass title="PASS" } |
+    | Wrong-digest rejection | :material-close:{ .result-no title="NO" } |
+    | Exact-size rejection | :material-close:{ .result-no title="NO" } |
+    | Cross-repository `Mount` | :material-close:{ .result-no title="NO" } |
+    | Shared-client concurrency | :material-check:{ .result-pass title="PASS" } |
+    | Off-origin redirect credential scope | :material-minus:{ .result-na title="N/A" } |
+    | Upload `Location` handling | :material-check:{ .result-pass title="PASS" } |
+    | Retry after registry throttling | :material-minus:{ .result-na title="N/A" } |
 
     **Wrong-digest rejection**: The commit returned `400` and `Push` returned an error, but the claimed digest afterwards answered `HEAD 200` and served bytes whose SHA-256 differs from it. A verified library `Pull` of that digest returns `ErrDigestMismatch`.
 
