@@ -28,3 +28,6 @@ PR #27 open, awaiting user review. Worktree docs/matrix-tabs retained until verd
 ## 2026-08-12 21:05 — Matrix iterations on PR #27
 Per user feedback: widened tab tables (Material shrinks both table and .md-typeset__table wrapper to content; both need width overrides, scoped to .tabbed-block), replaced PASS/NO/N-A text with colored material icons via pymdownx.emoji + content.tooltips-compatible title attrs, added per-feature hover tooltips (md_in_html spans), removed per-tab observed-limit notes and folded their load-bearing facts (Quay data loss mode, ECR BLOB_MOUNTING, Nexus mechanisms) into Differences at a glance; unreferenced-blob footnote folded into its tooltip.
 Each step verified in live browser: DOM extraction (180 cells by icon class, 20 tooltip spans per tab, 0 leftover notes) plus hover screenshot; strict locked builds green. Commits 36d5385, 3603c32, bc4fad8. PR #27 still unmerged, preview server mkdocs-tabs still running.
+
+## 2026-08-12 21:15 — PR #27 merged
+User approved the tabbed matrix. Squash-merged as 7453b75; preview server stopped; docs/matrix-tabs worktree and branch removed; local master synced.
