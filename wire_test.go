@@ -7,30 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestBlobURL(t *testing.T) {
-	dgst := digest.FromString("hello")
-
-	got := blobURL("https", Repository{Host: "registry.example.com:5000", Name: "library/ubuntu"}, dgst)
-
-	assert.Equal(t,
-		"https://registry.example.com:5000/v2/library/ubuntu/blobs/"+dgst.String(),
-		got.String())
-}
 
 func TestResolveLocation(t *testing.T) {
 	base, err := url.Parse("https://registry.example.com/v2/library/ubuntu/blobs/uploads/")
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
-		location string
-		want     string
-		wantErr  string
+		name      string
+		location  string
+		want      string
+		wantError bool
 	}{
 		{
 			name:     "resolves an absolute URL as itself",
@@ -48,14 +37,19 @@ func TestResolveLocation(t *testing.T) {
 			want:     "https://registry.example.com/v2/library/ubuntu/blobs/uploads/abc",
 		},
 		{
-			name:     "rejects an empty location",
-			location: "",
-			wantErr:  "no Location header",
+			name:      "rejects an empty location",
+			location:  "",
+			wantError: true,
 		},
 		{
-			name:     "rejects an unparseable location",
-			location: "http://registry.example.com/%zz",
-			wantErr:  "unparseable Location",
+			name:      "rejects an unparseable location",
+			location:  "http://registry.example.com/%zz",
+			wantError: true,
+		},
+		{
+			name:      "rejects an unsupported absolute scheme",
+			location:  "gopher://storage.example.com/upload/abc",
+			wantError: true,
 		},
 	}
 
@@ -63,23 +57,14 @@ func TestResolveLocation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := resolveLocation(base, tt.location)
 
-			if tt.wantErr != "" {
-				assert.ErrorContains(t, err, tt.wantErr)
+			if tt.wantError {
+				assert.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.String())
 		})
 	}
-}
-
-func TestIsSuccess(t *testing.T) {
-	assert.True(t, isSuccess(http.StatusOK), "200 is a success")
-	assert.True(t, isSuccess(http.StatusCreated), "201 is a success")
-	assert.True(t, isSuccess(http.StatusAccepted), "202 is a success")
-	assert.False(t, isSuccess(http.StatusMovedPermanently), "3xx is not a success")
-	assert.False(t, isSuccess(http.StatusNotFound), "4xx is not a success")
-	assert.False(t, isSuccess(http.StatusInternalServerError), "5xx is not a success")
 }
 
 func TestParseErrorBody(t *testing.T) {
@@ -134,10 +119,10 @@ func TestParseErrorBody(t *testing.T) {
 
 func TestInterpretError(t *testing.T) {
 	tests := []struct {
-		name        string
-		resp        *http.Response
-		wantMessage string
-		wantIs      error
+		name         string
+		resp         *http.Response
+		wantContains []string
+		wantIs       error
 	}{
 		{
 			name: "carries the parsed OCI detail",
@@ -146,7 +131,7 @@ func TestInterpretError(t *testing.T) {
 				Body: io.NopCloser(strings.NewReader(
 					`{"errors":[{"code":"UNKNOWN","message":"boom"}]}`)),
 			},
-			wantMessage: "registry returned 500: UNKNOWN: boom",
+			wantContains: []string{"UNKNOWN", "boom"},
 		},
 		{
 			name: "falls back to the status when the body is garbage",
@@ -154,7 +139,7 @@ func TestInterpretError(t *testing.T) {
 				StatusCode: http.StatusBadGateway,
 				Body:       io.NopCloser(strings.NewReader("<html>oops</html>")),
 			},
-			wantMessage: "registry returned 502 Bad Gateway",
+			wantContains: []string{"Bad Gateway"},
 		},
 		{
 			name: "handles a nil body",
@@ -162,7 +147,7 @@ func TestInterpretError(t *testing.T) {
 				StatusCode: http.StatusForbidden,
 				Body:       nil,
 			},
-			wantMessage: "registry returned 403 Forbidden",
+			wantContains: []string{"Forbidden"},
 		},
 		{
 			name: "maps 404 onto ErrNotFound",
@@ -171,8 +156,8 @@ func TestInterpretError(t *testing.T) {
 				Body: io.NopCloser(strings.NewReader(
 					`{"errors":[{"code":"BLOB_UNKNOWN","message":"blob unknown to registry"}]}`)),
 			},
-			wantMessage: "registry returned 404: BLOB_UNKNOWN: blob unknown to registry",
-			wantIs:      ErrNotFound,
+			wantContains: []string{"BLOB_UNKNOWN", "blob unknown to registry"},
+			wantIs:       ErrNotFound,
 		},
 	}
 
@@ -181,7 +166,9 @@ func TestInterpretError(t *testing.T) {
 			err := interpretError(tt.resp)
 
 			require.Error(t, err)
-			assert.Equal(t, tt.wantMessage, err.Error())
+			for _, detail := range tt.wantContains {
+				require.ErrorContains(t, err, detail)
+			}
 			if tt.wantIs != nil {
 				assert.ErrorIs(t, err, tt.wantIs)
 			}

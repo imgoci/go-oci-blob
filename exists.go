@@ -11,7 +11,7 @@ import (
 // Exists reports whether the repository holds a blob with the given
 // digest.
 //
-// Exists issues a HEAD request to the blob endpoint. A 2xx response
+// Exists issues a HEAD request to the blob endpoint. A 200 response
 // reports true. A 404 reports false with a nil error: absence is a
 // normal answer here, not a failure. Every other outcome is an error.
 //
@@ -39,10 +39,10 @@ func (c *Client) Exists(ctx context.Context, repo Repository, dgst digest.Digest
 	}
 	defer resp.Body.Close()
 
-	switch {
-	case isSuccess(resp.StatusCode):
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return true, nil
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		return false, nil
 	default:
 		return false, fmt.Errorf("checking blob %s in %s/%s: %w",

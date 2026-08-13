@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -15,8 +16,8 @@ import (
 // The zero value means a single attempt with no retries. Retries
 // trigger on connection errors, request timeouts, 429, and 5xx; other
 // 4xx statuses mean the request is wrong, not unlucky, and are never
-// retried. The caller's context bounds everything: a canceled context
-// stops retrying immediately.
+// retried. The caller's context bounds retry scheduling: a canceled context
+// stops new attempts and backoff immediately.
 type RetryPolicy struct {
 	// MaxAttempts is the total number of tries for one operation,
 	// including the first. Values below one behave as one.
@@ -86,17 +87,28 @@ func (p RetryPolicy) backoffDelay(attempt int, retryAfter time.Duration) time.Du
 // retryableStatus reports whether a response status warrants another
 // attempt: 429 and the whole 5xx family.
 func retryableStatus(code int) bool {
-	return code == http.StatusTooManyRequests || code >= http.StatusInternalServerError
+	return code == http.StatusTooManyRequests ||
+		(code >= http.StatusInternalServerError && code <= 599)
 }
 
 // retryAfterDelay parses a Retry-After header, which carries either a
 // number of seconds or an HTTP date. Zero means no usable wish.
 func retryAfterDelay(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
 	if header == "" {
 		return 0
 	}
-	if seconds, err := strconv.Atoi(header); err == nil {
+	if seconds, err := strconv.ParseUint(header, 10, 64); err == nil {
+		const maxDuration = time.Duration(1<<63 - 1)
+		if seconds > uint64(maxDuration/time.Second) {
+			return maxDuration
+		}
 		return time.Duration(seconds) * time.Second
+	} else if strings.Trim(header, "0123456789") == "" {
+		// A syntactically valid delay-seconds value that exceeds uint64
+		// still means "wait a very long time". Saturating lets MaxDelay
+		// cap it instead of wrapping the duration or ignoring the header.
+		return time.Duration(1<<63 - 1)
 	}
 	if at, err := http.ParseTime(header); err == nil {
 		return at.Sub(now)
@@ -131,32 +143,74 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 func (c *Client) doRetry(ctx context.Context, build func() (*http.Request, error)) (*http.Response, error) {
 	attempts := c.retry.attempts()
 	for attempt := 1; ; attempt++ {
-		req, err := build()
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-
-		resp, err := c.httpClient.Do(req)
-		last := attempt == attempts
-		switch {
-		case err != nil:
-			if ctx.Err() != nil || last {
-				return nil, err
-			}
-		case retryableStatus(resp.StatusCode) && !last:
-			drainAndClose(resp.Body)
-		default:
-			return resp, nil
+		result := c.doRetryAttempt(ctx, build, attempt == attempts)
+		if !result.retry {
+			return result.response, result.err
 		}
-
-		var retryAfter time.Duration
-		if err == nil {
-			retryAfter = retryAfterDelay(resp.Header.Get("Retry-After"), time.Now())
-		}
-		if err := sleepContext(ctx, c.retry.backoffDelay(attempt, retryAfter)); err != nil {
-			return nil, fmt.Errorf("retry canceled: %w", err)
+		if sleepErr := sleepContext(ctx, c.retry.backoffDelay(attempt, result.retryAfter)); sleepErr != nil {
+			return nil, retryCanceledError(sleepErr, result.err)
 		}
 	}
+}
+
+// retryAttemptResult describes one request outcome and any next-attempt wait.
+type retryAttemptResult struct {
+	// response is returned to the caller for a terminal HTTP outcome.
+	response *http.Response
+	// retryAfter is the registry's requested delay before another attempt.
+	retryAfter time.Duration
+	// retry reports whether the caller should consume another attempt.
+	retry bool
+	// err is a terminal error or the transport error that led to a retry.
+	err error
+}
+
+// doRetryAttempt executes one request and reports whether its outcome should
+// consume another attempt after retryAfter.
+func (c *Client) doRetryAttempt(
+	ctx context.Context, build func() (*http.Request, error), last bool,
+) retryAttemptResult {
+	req, err := build()
+	if err != nil {
+		return retryAttemptResult{err: err}
+	}
+	resp, err := c.doRegistryRequest(req) //nolint:bodyclose // terminal responses belong to doRetry callers
+	if err != nil {
+		if ctx.Err() != nil {
+			return retryAttemptResult{err: contextOperationError(ctx, err)}
+		}
+		if !retryableRequestError(err) || last {
+			return retryAttemptResult{err: err}
+		}
+		return retryAttemptResult{retry: true, err: err}
+	}
+	if !retryableStatus(resp.StatusCode) || last {
+		return retryAttemptResult{response: resp}
+	}
+	retryAfter := retryAfterDelay(resp.Header.Get("Retry-After"), time.Now())
+	drainAndClose(resp.Body)
+	return retryAttemptResult{retryAfter: retryAfter, retry: true}
+}
+
+// retryCanceledError keeps both cancellation and the last transport error
+// inspectable when a retry wait is interrupted.
+func retryCanceledError(cancelErr, lastErr error) error {
+	if lastErr != nil {
+		return fmt.Errorf("retry canceled: %w (last attempt: %w)", cancelErr, lastErr)
+	}
+	return fmt.Errorf("retry canceled: %w", cancelErr)
+}
+
+// contextOperationError keeps the caller's cancellation or deadline
+// inspectable while retaining the operation error that exposed it.
+func contextOperationError(ctx context.Context, operationErr error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%w (operation failed with: %w)", ctxErr, operationErr)
+	}
+	return operationErr
 }
 
 // drainAndClose discards a bounded amount of a response body and

@@ -33,3 +33,37 @@
   --md-footer-fg-color: #d9e3ec;
   --md-footer-fg-color--light: #b8c7d9;
 }
+
+/* Tables inside content tabs fill the tab panel instead of shrinking to
+   their content width. Both the table and Material's inline-block wrapper
+   need widening. */
+.md-typeset .tabbed-block .md-typeset__table {
+  display: block;
+  width: 100%;
+}
+
+.md-typeset .tabbed-block .md-typeset__table table:not([class]) {
+  display: table;
+  width: 100%;
+}
+
+/* Compatibility result icons. */
+.md-typeset .result-pass {
+  color: #2e9e5b;
+}
+
+.md-typeset .result-no {
+  color: #e5484d;
+}
+
+.md-typeset .result-na {
+  color: var(--md-default-fg-color--lighter);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .result-pass {
+  color: #4fd17c;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .result-no {
+  color: #ff6369;
+}

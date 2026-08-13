@@ -1,0 +1,84 @@
+language: 'go'
+layer: 'tool'
+
+# mise owns the Go and linter versions. Moon only schedules the commands.
+toolchains:
+  default: 'system'
+
+project:
+  title: 'Registry compatibility harness'
+  description: 'Agent-operated live registry compatibility probes.'
+
+env:
+  # Keep the consumer module isolated from an ambient parent go.work file.
+  GOWORK: 'off'
+
+fileGroups:
+  sources:
+    - '**/*.go'
+    - 'go.mod'
+    - 'go.sum'
+    - 'moon.yml'
+    # The nested module compiles the public library through its local replace,
+    # so changes to the consumer-facing package must invalidate these checks.
+    - '/*.go'
+    - '/go.mod'
+    - '/go.sum'
+    - '/.golangci.yml'
+    - '/mise.toml'
+    - '/mise.lock'
+
+workspace:
+  inheritedTasks:
+    include: []
+
+tasks:
+  format:
+    command: 'golangci-lint fmt --config ../.golangci.yml --diff'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  lint:
+    # A local replace is the consumer boundary, and corpus fixture sizes are
+    # protocol evidence rather than unexplained production constants.
+    command: 'golangci-lint run --allow-serial-runners --config ../.golangci.yml -D gomoddirectives,mnd ./... --show-stats=false'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  build:
+    command: 'go build ./...'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  test:
+    command: 'go test ./...'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  test-race:
+    command: 'go test -race ./...'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  check:
+    deps:
+      - 'compat:format'
+      - 'compat:lint'
+      - 'compat:build'
+      - 'compat:test'
+      - 'compat:test-race'
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+      runInCI: true

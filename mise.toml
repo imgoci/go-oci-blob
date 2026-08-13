@@ -16,7 +16,7 @@
 
 [tools]
 # Language runtimes (core backend).
-go = "1.26.4"
+go = "1.26.5"
 python = "3.14.3"
 
 # Go dev-tool CLI. The explicit `aqua:` ref forces the VERIFYING backend (checksum +
@@ -28,6 +28,9 @@ python = "3.14.3"
 # only needed when regenerating them.
 "aqua:vektra/mockery" = "3.7.2"
 
+# Independent OCI Distribution control used by the manual compatibility runbook.
+"aqua:oras-project/oras" = "1.3.3"
+
 # Docs (MkDocs) toolchain — moved off moon's former unstable_python/unstable_uv.
 "aqua:astral-sh/uv" = "0.11.0"
 
@@ -37,7 +40,7 @@ python = "3.14.3"
 
 [env]
 # Pin the Go toolchain: never auto-download a toolchain other than the one above.
-# The version here is authoritative and matches go.mod's `go 1.26.4`.
+# The version here is authoritative and matches go.mod's `go 1.26.5`.
 GOTOOLCHAIN = "local"
 
 [settings]

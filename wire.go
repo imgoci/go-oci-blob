@@ -44,14 +44,16 @@ func resolveLocation(base *url.URL, location string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("registry returned unparseable Location %q: %w", location, err)
 	}
-	return base.ResolveReference(ref), nil
-}
-
-// isSuccess reports whether the status code sits in the 2xx family.
-// The client reacts to families, not exact codes: a registry that
-// returns 200 where the spec says 201 still succeeded.
-func isSuccess(code int) bool {
-	return code >= http.StatusOK && code < http.StatusMultipleChoices
+	resolved := base.ResolveReference(ref)
+	resolved.Scheme = strings.ToLower(resolved.Scheme)
+	if resolved.Scheme != registrySchemeHTTP && resolved.Scheme != registrySchemeHTTPS {
+		return nil, fmt.Errorf("registry returned Location %q with unsupported scheme %q",
+			location, resolved.Scheme)
+	}
+	if resolved.Hostname() == "" {
+		return nil, fmt.Errorf("registry returned Location %q without a host", location)
+	}
+	return resolved, nil
 }
 
 // interpretError turns a non-success registry response into an error.
@@ -104,24 +106,78 @@ func parseErrorBody(body []byte) string {
 	return strings.Join(parts, "; ")
 }
 
-// parseContentRangeTotal extracts the total blob size from a
-// Content-Range header of the form "bytes <start>-<end>/<total>".
-// A missing header, an unknown total ("*"), or any other shape
-// reports false.
-func parseContentRangeTotal(header string) (int64, bool) {
-	rest, found := strings.CutPrefix(header, "bytes ")
+// contentRange is a validated byte interval reported by a
+// Content-Range response header.
+type contentRange struct {
+	// start is the inclusive first byte in the response body.
+	start int64
+	// end is the inclusive final byte in the response body.
+	end int64
+	// total is the complete representation length.
+	total int64
+}
+
+// parseContentRange parses a satisfied byte Content-Range of the
+// form "bytes <start>-<end>/<total>". Unknown totals and intervals
+// outside the complete representation report false.
+func parseContentRange(header string) (contentRange, bool) {
+	unit, rest, found := strings.Cut(header, " ")
+	if !found || !strings.EqualFold(unit, "bytes") {
+		return contentRange{}, false
+	}
+	intervalText, totalText, found := strings.Cut(rest, "/")
 	if !found {
-		return 0, false
+		return contentRange{}, false
 	}
-	_, totalText, found := strings.Cut(rest, "/")
+	startText, endText, found := strings.Cut(intervalText, "-")
 	if !found {
-		return 0, false
+		return contentRange{}, false
 	}
-	total, err := strconv.ParseInt(totalText, 10, 64)
-	if err != nil || total < 0 {
-		return 0, false
+	start, err := parseDecimal(startText)
+	if err != nil || start < 0 {
+		return contentRange{}, false
 	}
-	return total, true
+	end, err := parseDecimal(endText)
+	if err != nil || end < start {
+		return contentRange{}, false
+	}
+	total, err := parseDecimal(totalText)
+	if err != nil || total <= end {
+		return contentRange{}, false
+	}
+	return contentRange{start: start, end: end, total: total}, true
+}
+
+// unsatisfiedRangeTotal parses "bytes */<total>" from a 416 response. A
+// malformed or non-byte value returns -1.
+func unsatisfiedRangeTotal(header string) int64 {
+	unit, rest, found := strings.Cut(strings.TrimSpace(header), " ")
+	if !found || !strings.EqualFold(unit, "bytes") {
+		return -1
+	}
+	interval, totalText, found := strings.Cut(rest, "/")
+	if !found || interval != "*" {
+		return -1
+	}
+	total, err := parseDecimal(totalText)
+	if err != nil {
+		return -1
+	}
+	return total
+}
+
+// parseDecimal parses the HTTP grammar's non-empty DIGIT sequence
+// without accepting signs or surrounding whitespace.
+func parseDecimal(text string) (int64, error) {
+	if text == "" {
+		return 0, strconv.ErrSyntax
+	}
+	for _, char := range text {
+		if char < '0' || char > '9' {
+			return 0, strconv.ErrSyntax
+		}
+	}
+	return strconv.ParseInt(text, 10, 64)
 }
 
 // registryError is an error derived from a registry HTTP response.

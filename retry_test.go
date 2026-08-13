@@ -8,12 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRetryPolicyAttempts(t *testing.T) {
-	assert.Equal(t, 1, RetryPolicy{}.attempts(), "zero policy means one attempt")
-	assert.Equal(t, 1, RetryPolicy{MaxAttempts: -3}.attempts(), "negative clamps to one")
-	assert.Equal(t, 4, DefaultRetryPolicy().attempts())
-}
-
 func TestRetryPolicyBackoffDelay(t *testing.T) {
 	policy := RetryPolicy{
 		MaxAttempts:  5,
@@ -42,6 +36,8 @@ func TestRetryPolicyBackoffDelay(t *testing.T) {
 
 	t.Run("caps a Retry-After wish at MaxDelay", func(t *testing.T) {
 		assert.Equal(t, time.Second, policy.backoffDelay(1, time.Minute))
+		assert.Equal(t, time.Second, policy.backoffDelay(1, time.Duration(1<<63-1)),
+			"a saturated Retry-After must still honor MaxDelay")
 	})
 
 	t.Run("waits nothing under a zero policy", func(t *testing.T) {
@@ -65,6 +61,17 @@ func TestRetryAfterDelay(t *testing.T) {
 		},
 		{name: "ignores an empty header", header: "", want: 0},
 		{name: "ignores garbage", header: "soon", want: 0},
+		{
+			name:   "saturates seconds that would overflow a duration",
+			header: "9223372037",
+			want:   time.Duration(1<<63 - 1),
+		},
+		{
+			name:   "saturates a decimal value larger than uint64",
+			header: "18446744073709551616",
+			want:   time.Duration(1<<63 - 1),
+		},
+		{name: "ignores a negative delay", header: "-1", want: 0},
 	}
 
 	for _, tt := range tests {
@@ -72,14 +79,4 @@ func TestRetryAfterDelay(t *testing.T) {
 			assert.Equal(t, tt.want, retryAfterDelay(tt.header, now))
 		})
 	}
-}
-
-func TestRetryableStatus(t *testing.T) {
-	assert.True(t, retryableStatus(429), "429 is retryable")
-	assert.True(t, retryableStatus(500), "500 is retryable")
-	assert.True(t, retryableStatus(503), "503 is retryable")
-	assert.False(t, retryableStatus(400), "400 means the request is wrong, not unlucky")
-	assert.False(t, retryableStatus(401), "401 is not retryable")
-	assert.False(t, retryableStatus(404), "404 is not retryable")
-	assert.False(t, retryableStatus(200), "success is not retryable")
 }

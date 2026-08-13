@@ -1,10 +1,10 @@
 //go:build e2e
 
-package blob_test
+package integration
 
-// End-to-end tests against real registries via testcontainers. They
+// Integration tests exercise real registries through testcontainers. They
 // need a running Docker daemon and only build with the e2e tag:
-// `go test -tags e2e ./...`.
+// `go test -tags e2e ./internal/integration/...`.
 
 import (
 	"bytes"
@@ -24,10 +24,10 @@ import (
 	blob "github.com/imgoci/go-oci-blob"
 )
 
-// e2eRegistries lists the registry images every e2e test runs against.
+// testRegistries lists the registry images every integration test runs against.
 // Both are OCI-conformant, multi-arch, and serve the distribution API
 // on port 5000 with their stock configuration.
-func e2eRegistries() []struct{ name, image string } {
+func testRegistries() []struct{ name, image string } {
 	return []struct{ name, image string }{
 		{name: "registry", image: "registry:2"},
 		{name: "zot", image: "ghcr.io/project-zot/zot:v2.1.20"},
@@ -91,8 +91,8 @@ func seedBlob(t *testing.T, registry, name string, dgst digest.Digest, data []by
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "committing upload")
 }
 
-func TestExistsE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestExists(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/exists"}
@@ -113,8 +113,8 @@ func TestExistsE2E(t *testing.T) {
 	}
 }
 
-func TestPullE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestPull(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/pull"}
@@ -137,8 +137,8 @@ func TestPullE2E(t *testing.T) {
 	}
 }
 
-func TestPullRangeE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestPullRange(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/pullrange"}
@@ -160,8 +160,8 @@ func TestPullRangeE2E(t *testing.T) {
 	}
 }
 
-func TestPushE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestPush(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/push"}
@@ -187,8 +187,8 @@ func TestPushE2E(t *testing.T) {
 	}
 }
 
-func TestParallelPullE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestParallelPull(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/parallel"}
@@ -211,8 +211,8 @@ func TestParallelPullE2E(t *testing.T) {
 	}
 }
 
-func TestChunkedPushE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestChunkedPush(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			repo := blob.Repository{Host: address, Name: "e2e/chunked"}
@@ -237,8 +237,8 @@ func TestChunkedPushE2E(t *testing.T) {
 	}
 }
 
-func TestMountE2E(t *testing.T) {
-	for _, reg := range e2eRegistries() {
+func TestMount(t *testing.T) {
+	for _, reg := range testRegistries() {
 		t.Run(reg.name, func(t *testing.T) {
 			address := startRegistry(t, reg.image)
 			src := blob.Repository{Host: address, Name: "e2e/mount-src"}

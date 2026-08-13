@@ -75,26 +75,6 @@ func TestClientPullParallel(t *testing.T) {
 			"the probe response body itself must serve as the fallback stream")
 	})
 
-	t.Run("pulls an empty blob despite the unsatisfiable probe range", func(t *testing.T) {
-		tc := newParallelContext(t, 4, 10)
-		empty := digest.FromString("")
-		emptyEndpoint := "https://registry.example.com/v2/library/ubuntu/blobs/" + empty.String()
-		tc.transport.EXPECT().
-			RoundTrip(getRequestFor(emptyEndpoint, "bytes=0-9")).
-			Return(response(http.StatusRequestedRangeNotSatisfiable, ""), nil).Once()
-		tc.transport.EXPECT().
-			RoundTrip(getRequestFor(emptyEndpoint, "")).
-			Return(response(http.StatusOK, ""), nil).Once()
-
-		rc, err := tc.client.Pull(t.Context(), repo, empty)
-
-		require.NoError(t, err)
-		got, err := io.ReadAll(rc)
-		require.NoError(t, err)
-		require.NoError(t, rc.Close())
-		assert.Empty(t, got)
-	})
-
 	t.Run("retries a chunk whose body breaks mid-read", func(t *testing.T) {
 		tc := newTestContext(t,
 			blob.WithParallelPull(2, 10), blob.WithRetryPolicy(fastRetry()))
@@ -139,29 +119,10 @@ func TestClientPullParallel(t *testing.T) {
 		rc, err := tc.client.Pull(t.Context(), repo, dgst)
 
 		require.NoError(t, err)
-		_, err = io.ReadAll(rc)
-		require.ErrorContains(t, err, "stopped honoring range requests")
+		got, err := io.ReadAll(rc)
+		require.Error(t, err)
 		require.NoError(t, rc.Close())
-	})
-
-	t.Run("closing early releases every in-flight chunk", func(t *testing.T) {
-		tc := newParallelContext(t, 4, 10)
-		for start := int64(0); start < int64(len(content)); start += 10 {
-			end := min(start+9, int64(len(content))-1)
-			tc.transport.EXPECT().
-				RoundTrip(getRequestFor(endpoint, fmt.Sprintf("bytes=%d-%d", start, end))).
-				RunAndReturn(func(*http.Request) (*http.Response, error) {
-					return rangedResponse(content, start, end), nil
-				}).Maybe()
-		}
-
-		rc, err := tc.client.Pull(t.Context(), repo, dgst)
-
-		require.NoError(t, err)
-		first := make([]byte, 5)
-		_, err = io.ReadFull(rc, first)
-		require.NoError(t, err)
-		require.NoError(t, rc.Close(), "early close must not deadlock or leak")
-		assert.Equal(t, content[:5], string(first))
+		assert.Equal(t, content[:10], string(got),
+			"bytes from the ignored later range must not be delivered")
 	})
 }

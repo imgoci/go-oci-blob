@@ -1,17 +1,20 @@
 package blob
 
 import (
+	"math"
 	"net/http"
-	"sync"
+	"reflect"
 )
+
+// maxParallelPullWorkers bounds channel capacity and goroutine fan-out for a
+// caller-controlled option before either can become unsafe to allocate.
+const maxParallelPullWorkers = 1024
 
 // Client transfers blobs to and from OCI registries. It is safe for
 // concurrent use. Create one with [New].
 type Client struct {
-	// httpClient executes registry requests and follows redirects to
-	// blob storage (S3, CDN). Go's http.Client strips Authorization on
-	// cross-host redirects; the design depends on that, so registry
-	// credentials never reach a storage host.
+	// httpClient routes registry and off-origin storage requests through
+	// separate transports and applies the client's redirect policy.
 	httpClient *http.Client
 
 	// plainHTTP selects http:// instead of https:// for registry URLs.
@@ -27,9 +30,9 @@ type Client struct {
 	pullWorkers int
 	// pullChunk is the ranged-fetch size for parallel pull.
 	pullChunk int64
-	// bufPool recycles chunk buffers across parallel pulls; nil when
-	// parallel pull is off.
-	bufPool *sync.Pool
+	// bufPool retains at most one reusable chunk buffer per configured worker;
+	// nil when parallel pull is off.
+	bufPool chan []byte
 }
 
 // Option configures a Client built by [New].
@@ -38,8 +41,16 @@ type Option func(*options)
 // options collects the settings applied by New before the Client is
 // assembled.
 type options struct {
-	// transport is the caller-injected port for all registry I/O.
+	// transport is the caller-injected port for registry-origin I/O.
 	transport http.RoundTripper
+	// transportConfigured records that transport is caller-owned and must not
+	// be replaced by library default tuning.
+	transportConfigured bool
+	// storageTransport handles requests outside the registry origin.
+	storageTransport http.RoundTripper
+	// storageTransportConfigured records that storageTransport is caller-owned
+	// and must not be replaced by library default tuning.
+	storageTransportConfigured bool
 	// plainHTTP selects http:// registry URLs.
 	plainHTTP bool
 	// retry bounds how failed requests are re-attempted.
@@ -64,12 +75,37 @@ type options struct {
 //	client := blob.New(blob.WithTransport(authTransport))
 //	ok, err := client.Exists(ctx, repo, dgst)
 func New(opts ...Option) *Client {
-	o := options{transport: http.DefaultTransport, plainHTTP: false, retry: DefaultRetryPolicy()}
+	o := options{
+		transport:        http.DefaultTransport,
+		storageTransport: http.DefaultTransport,
+		plainHTTP:        false,
+		retry:            DefaultRetryPolicy(),
+	}
 	for _, opt := range opts {
-		opt(&o)
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	registryTransport := o.transport
+	storageTransport := o.storageTransport
+	if o.pullWorkers > http.DefaultMaxIdleConnsPerHost &&
+		(!o.transportConfigured || !o.storageTransportConfigured) {
+		parallelDefault := defaultTransportForParallelPull(o.pullWorkers)
+		if !o.transportConfigured {
+			registryTransport = parallelDefault
+		}
+		if !o.storageTransportConfigured {
+			storageTransport = parallelDefault
+		}
 	}
 	c := &Client{
-		httpClient:  &http.Client{Transport: o.transport},
+		httpClient: &http.Client{
+			Transport: &scopedTransport{
+				registry: registryTransport,
+				storage:  storageTransport,
+			},
+			CheckRedirect: checkRedirect,
+		},
 		plainHTTP:   o.plainHTTP,
 		retry:       o.retry,
 		chunkSize:   o.chunkSize,
@@ -77,18 +113,36 @@ func New(opts ...Option) *Client {
 		pullChunk:   o.pullChunk,
 	}
 	if c.pullWorkers > 0 {
-		c.bufPool = &sync.Pool{New: func() any {
-			buf := make([]byte, c.pullChunk)
-			return &buf
-		}}
+		c.bufPool = make(chan []byte, c.pullWorkers)
 	}
 	return c
+}
+
+// defaultTransportForParallelPull clones the process default and raises its
+// ordinary idle limits for the configured pull workers. Explicitly disabled
+// idle pools and non-standard replacements are returned without being
+// overridden because the library cannot safely tune them.
+func defaultTransportForParallelPull(workers int) http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	transport := base.Clone()
+	if transport.MaxIdleConns > 0 && transport.MaxIdleConns < workers {
+		transport.MaxIdleConns = workers
+	}
+	if transport.MaxIdleConnsPerHost >= 0 && transport.MaxIdleConnsPerHost < workers {
+		transport.MaxIdleConnsPerHost = workers
+	}
+	return transport
 }
 
 // WithParallelPull switches Pull to fetch blobs with workers
 // concurrent ranged requests of chunkSize bytes each. Values below
 // one for either parameter are ignored and leave single-stream pull
-// in place.
+// in place. Worker counts above 1,024 and configurations whose workers ×
+// chunkSize memory bound cannot be represented by an int64 are likewise
+// ignored.
 //
 // Pull's contract does not change: chunks are emitted in order
 // through the same digest-verifying reader. Memory use is bounded by
@@ -96,10 +150,13 @@ func New(opts ...Option) *Client {
 // exception to never buffering — and the caller sets that bound with
 // these two parameters. When the registry does not serve ranges,
 // Pull quietly falls back to a single stream: the toggle states
-// intent, not a requirement.
+// intent, not a requirement. The library sizes its default HTTP/1 idle pool
+// for the requested worker count. Caller-supplied transports are not modified;
+// configure their connection pools for the intended concurrency.
 func WithParallelPull(workers int, chunkSize int64) Option {
 	return func(o *options) {
-		if workers > 0 && chunkSize > 0 {
+		if workers > 0 && workers <= maxParallelPullWorkers && chunkSize > 0 &&
+			int64(workers) <= math.MaxInt64/chunkSize {
 			o.pullWorkers = workers
 			o.pullChunk = chunkSize
 		}
@@ -125,15 +182,31 @@ func WithChunkedUpload(chunkSize int64) Option {
 	}
 }
 
-// WithTransport sets the [http.RoundTripper] used for every registry
-// request. This is the seam where authentication is injected: pass an
-// authenticated transport from a library such as oras-go or
-// go-containerregistry. A nil transport selects
-// [http.DefaultTransport].
+// WithTransport sets the [http.RoundTripper] used for requests to the
+// registry origin. This is the seam where registry authentication is
+// injected: pass an authenticated transport from a library such as
+// oras-go or go-containerregistry. Off-origin redirects and absolute
+// upload locations do not pass through this transport. A nil or typed-nil
+// transport keeps the library-managed default transport.
 func WithTransport(rt http.RoundTripper) Option {
 	return func(o *options) {
-		if rt != nil {
+		if !isNilValue(rt) {
 			o.transport = rt
+			o.transportConfigured = true
+		}
+	}
+}
+
+// WithStorageTransport sets the [http.RoundTripper] used for off-origin
+// storage and CDN requests. It receives requests after registry credentials,
+// cookies, proxy credentials, and referrer data have been removed; use it for
+// storage-specific TLS, proxy, or authentication behavior. A nil or typed-nil
+// transport keeps the library-managed default transport.
+func WithStorageTransport(rt http.RoundTripper) Option {
+	return func(o *options) {
+		if !isNilValue(rt) {
+			o.storageTransport = rt
+			o.storageTransportConfigured = true
 		}
 	}
 }
@@ -150,7 +223,20 @@ func WithPlainHTTP(plain bool) Option {
 // scheme returns the URL scheme the Client addresses registries with.
 func (c *Client) scheme() string {
 	if c.plainHTTP {
-		return "http"
+		return registrySchemeHTTP
 	}
-	return "https"
+	return registrySchemeHTTPS
+}
+
+// isNilValue reports whether value is nil directly or through a nil-capable
+// concrete value stored in an interface.
+func isNilValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	kind := reflected.Kind()
+	nilable := kind == reflect.Chan || kind == reflect.Func || kind == reflect.Interface ||
+		kind == reflect.Map || kind == reflect.Pointer || kind == reflect.Slice
+	return nilable && reflected.IsNil()
 }
