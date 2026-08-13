@@ -24,5 +24,3 @@
 ### Performance
 
 * remove transfer hot-path bottlenecks ([#21](https://github.com/imgoci/go-oci-blob/issues/21)) ([0251e8c](https://github.com/imgoci/go-oci-blob/commit/0251e8cead2021022fbfc1b188eeeff1030172cc))
-
-## Changelog
