@@ -243,3 +243,9 @@ Squash-merged PR #25 through GitHub with the reviewed head pinned to `c369be36fe
 Post-merge verification: the exact `401ad8a5ab3a886107e1d974302cecbb18c3d545` push passed CI, Go and Actions CodeQL, GitHub Pages, Release Please, and the dependency-graph update. Fast-forwarded the clean local `master`, confirmed it matches `origin/master`, and removed only the integrated `feat/registry-compat-harness` Worktrunk worktree and local branch. GitHub removed the remote feature branch. The main checkout remains clean.
 
 Next: Keep session 005 open unless explicitly asked to close it.
+
+## 2026-08-12 19:54 — Close
+
+Closed session 005 after both session implementation PRs were reviewed and squash-merged: progress callback contract PR #24 (`8700a0989bb82ca272ca986e2dc8eae79536d1b5`) and repeatable registry compatibility harness PR #25 (`401ad8a5ab3a886107e1d974302cecbb18c3d545`). All exact post-merge workflows passed. Local `master` is clean and matches `origin/master`; the feature branches, remote branches, and Worktrunk worktrees are gone.
+
+The handoff is `SUMMARY.md`, the dated historical matrix in `REGISTRY_TEST_RESULTS.md`, and the merged refresh runbook at `docs/docs/how-to/refresh-registry-compatibility.md`. Updated `TECH_NOTES.md` to point future agents to the retained harness, replace the stale hosted-chunked generalization, and record that ECR `BLOB_MOUNTING` remains enabled by request. A final local audit found no campaign temporary directory or container. The compatibility matrix remains a journal artifact and should be refreshed with the merged harness before promotion into user-facing docs.
