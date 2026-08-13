@@ -337,6 +337,13 @@ func (b *uploadBody) waitReleased() {
 	<-b.released
 }
 
+// closeAndWait releases a replay body that net/http created but did not send
+// after a redirect-policy rejection.
+func (b *uploadBody) closeAndWait() {
+	_ = b.Close()
+	b.waitReleased()
+}
+
 // sourceErrorIfReleased reports a proven source error after its state is stable.
 func (b *uploadBody) sourceErrorIfReleased() error {
 	select {

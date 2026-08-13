@@ -13,6 +13,9 @@ import (
 // write into a bodyless GET and could therefore create a false success.
 var errMethodChangingRedirect = errors.New("registry redirect changes the request method")
 
+// errWriteRedirectRejected reports a caller-disabled write redirect.
+var errWriteRedirectRejected = errors.New("registry write redirect rejected")
+
 // errInvalidRedirectTarget reports a redirect outside the supported HTTP(S)
 // URL space before any transport receives it.
 var errInvalidRedirectTarget = errors.New("registry redirect has an invalid target")
@@ -125,9 +128,16 @@ func originOfResponse(resp *http.Response) responseOrigin {
 	return responseOriginRegistry
 }
 
-// checkRedirect rejects method-changing redirects for registry writes and
-// otherwise applies net/http's default ten-hop limit.
-func checkRedirect(req *http.Request, via []*http.Request) error {
+// redirectPolicy returns the redirect policy for one Client.
+func redirectPolicy(allowWrite bool) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		return checkRedirect(allowWrite, req, via)
+	}
+}
+
+// checkRedirect rejects unsafe redirects and applies net/http's default
+// ten-hop limit.
+func checkRedirect(allowWrite bool, req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("%w: stopped after %d redirects", errTooManyRedirects, maxRedirects)
 	}
@@ -135,19 +145,33 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 		return nil
 	}
 	if _, ok := normalizeOrigin(req.URL); !ok {
-		return fmt.Errorf("%w: %s", errInvalidRedirectTarget, req.URL)
+		return errInvalidRedirectTarget
 	}
 	previous := via[len(via)-1]
+	if isWriteMethod(previous.Method) && !allowWrite {
+		return errWriteRedirectRejected
+	}
 	if previous.Method != http.MethodGet && previous.Method != http.MethodHead && req.Method != previous.Method {
 		return fmt.Errorf("%w: %s became %s", errMethodChangingRedirect, previous.Method, req.Method)
 	}
 	return nil
 }
 
+// isWriteMethod reports whether method can mutate registry or upload state.
+func isWriteMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
 // retryableRequestError reports transport failures that a fresh request may
 // fix; policy-rejected redirects are deterministic and must not be retried.
 func retryableRequestError(err error) bool {
 	return !errors.Is(err, errMethodChangingRedirect) &&
+		!errors.Is(err, errWriteRedirectRejected) &&
 		!errors.Is(err, errInvalidRedirectTarget) &&
 		!errors.Is(err, errTooManyRedirects) &&
 		!malformedRedirectError(err)
@@ -161,16 +185,43 @@ func malformedRedirectError(err error) bool {
 		strings.HasPrefix(urlErr.Err.Error(), "failed to parse Location header ")
 }
 
+// requestError retains a transport cause without rendering its peer-selected
+// URL or response text.
+type requestError struct {
+	// operation identifies the failed request boundary.
+	operation string
+	// err is the original transport or redirect-policy failure.
+	err error
+}
+
+// Error renders only the structural operation.
+func (e *requestError) Error() string {
+	return e.operation + " failed"
+}
+
+// Unwrap exposes the original failure for programmatic inspection.
+func (e *requestError) Unwrap() error {
+	return e.err
+}
+
 // doRegistryRequest executes an initial request and marks its own URL as the
 // authenticated registry origin for any redirects it follows.
 func (c *Client) doRegistryRequest(req *http.Request) (*http.Response, error) {
-	// The repository host is an intentional caller-selected network target.
-	return c.httpClient.Do(withRegistryOrigin(req, req.URL)) //nolint:gosec // The caller selects the registry host.
+	// #nosec G704 -- The caller intentionally selects the registry host.
+	resp, err := c.httpClient.Do(withRegistryOrigin(req, req.URL))
+	if err != nil {
+		return resp, &requestError{operation: "registry request", err: err}
+	}
+	return resp, nil
 }
 
 // doLocationRequest executes a request to a registry-provided Location while
 // retaining the original registry origin for transport routing.
 func (c *Client) doLocationRequest(req *http.Request, originURL *url.URL) (*http.Response, error) {
 	// #nosec G704 -- OCI registries are allowed to select absolute storage URLs.
-	return c.httpClient.Do(withRegistryOrigin(req, originURL))
+	resp, err := c.httpClient.Do(withRegistryOrigin(req, originURL))
+	if err != nil {
+		return resp, &requestError{operation: "upload or storage request", err: err}
+	}
+	return resp, nil
 }

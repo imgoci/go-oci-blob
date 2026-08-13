@@ -37,18 +37,34 @@ func TestResolveLocation(t *testing.T) {
 			want:     "https://registry.example.com/v2/library/ubuntu/blobs/uploads/abc",
 		},
 		{
-			name:      "rejects an empty location",
-			location:  "",
-			wantError: true,
+			name:     "drops a fragment without changing opaque query bytes",
+			location: "abc?_state=a;b&token=%2Fopaque#peer-fragment",
+			want:     "https://registry.example.com/v2/library/ubuntu/blobs/uploads/abc?_state=a;b&token=%2Fopaque",
 		},
+		{name: "rejects an empty location", wantError: true},
 		{
 			name:      "rejects an unparseable location",
-			location:  "http://registry.example.com/%zz",
+			location:  "https://storage.example.com/%zz?signature=secret",
 			wantError: true,
 		},
 		{
 			name:      "rejects an unsupported absolute scheme",
-			location:  "gopher://storage.example.com/upload/abc",
+			location:  "gopher://storage.example.com/upload/abc?signature=secret",
+			wantError: true,
+		},
+		{
+			name:      "rejects user information",
+			location:  "https://user:password@storage.example.com/upload/abc",
+			wantError: true,
+		},
+		{
+			name:      "rejects an HTTPS downgrade",
+			location:  "http://storage.example.com/upload/abc?signature=secret",
+			wantError: true,
+		},
+		{
+			name:      "rejects a hostless absolute URL",
+			location:  "https:///upload/abc?signature=secret",
 			wantError: true,
 		},
 	}
@@ -58,7 +74,10 @@ func TestResolveLocation(t *testing.T) {
 			got, err := resolveLocation(base, tt.location)
 
 			if tt.wantError {
-				assert.Error(t, err)
+				require.Error(t, err)
+				if tt.location != "" {
+					assert.NotContains(t, err.Error(), tt.location)
+				}
 				return
 			}
 			require.NoError(t, err)
@@ -67,111 +86,21 @@ func TestResolveLocation(t *testing.T) {
 	}
 }
 
-func TestParseErrorBody(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "renders code and message",
-			body: `{"errors":[{"code":"BLOB_UNKNOWN","message":"blob unknown to registry"}]}`,
-			want: "BLOB_UNKNOWN: blob unknown to registry",
-		},
-		{
-			name: "joins multiple errors",
-			body: `{"errors":[{"code":"A","message":"first"},{"code":"B","message":"second"}]}`,
-			want: "A: first; B: second",
-		},
-		{
-			name: "renders a code without a message",
-			body: `{"errors":[{"code":"DENIED"}]}`,
-			want: "DENIED",
-		},
-		{
-			name: "renders a message without a code",
-			body: `{"errors":[{"message":"try again"}]}`,
-			want: "try again",
-		},
-		{
-			name: "yields nothing for garbage",
-			body: `<html>502 Bad Gateway</html>`,
-			want: "",
-		},
-		{
-			name: "yields nothing for an empty body",
-			body: ``,
-			want: "",
-		},
-		{
-			name: "yields nothing for JSON of another shape",
-			body: `{"message":"not the OCI envelope"}`,
-			want: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, parseErrorBody([]byte(tt.body)))
-		})
-	}
-}
-
 func TestInterpretError(t *testing.T) {
-	tests := []struct {
-		name         string
-		resp         *http.Response
-		wantContains []string
-		wantIs       error
-	}{
-		{
-			name: "carries the parsed OCI detail",
-			resp: &http.Response{
-				StatusCode: http.StatusInternalServerError,
-				Body: io.NopCloser(strings.NewReader(
-					`{"errors":[{"code":"UNKNOWN","message":"boom"}]}`)),
-			},
-			wantContains: []string{"UNKNOWN", "boom"},
-		},
-		{
-			name: "falls back to the status when the body is garbage",
-			resp: &http.Response{
-				StatusCode: http.StatusBadGateway,
-				Body:       io.NopCloser(strings.NewReader("<html>oops</html>")),
-			},
-			wantContains: []string{"Bad Gateway"},
-		},
-		{
-			name: "handles a nil body",
-			resp: &http.Response{
-				StatusCode: http.StatusForbidden,
-				Body:       nil,
-			},
-			wantContains: []string{"Forbidden"},
-		},
-		{
-			name: "maps 404 onto ErrNotFound",
-			resp: &http.Response{
-				StatusCode: http.StatusNotFound,
-				Body: io.NopCloser(strings.NewReader(
-					`{"errors":[{"code":"BLOB_UNKNOWN","message":"blob unknown to registry"}]}`)),
-			},
-			wantContains: []string{"BLOB_UNKNOWN", "blob unknown to registry"},
-			wantIs:       ErrNotFound,
-		},
+	peerDetail := "reflected-secret\u001b[2J"
+	resp := &http.Response{
+		StatusCode: http.StatusNotFound,
+		Body: io.NopCloser(strings.NewReader(
+			`{"errors":[{"code":"BLOB_UNKNOWN","message":"` + peerDetail + `"}]}`)),
+		Header: http.Header{},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := interpretError(tt.resp)
+	err := interpretError(resp)
 
-			require.Error(t, err)
-			for _, detail := range tt.wantContains {
-				require.ErrorContains(t, err, detail)
-			}
-			if tt.wantIs != nil {
-				assert.ErrorIs(t, err, tt.wantIs)
-			}
-		})
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Contains(t, err.Error(), "404 Not Found")
+	assert.NotContains(t, err.Error(), "BLOB_UNKNOWN")
+	assert.NotContains(t, err.Error(), "reflected-secret")
+	assert.NotContains(t, err.Error(), "\u001b")
 }

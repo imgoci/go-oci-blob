@@ -23,6 +23,9 @@ type Client struct {
 	// retry bounds how failed requests are re-attempted.
 	retry RetryPolicy
 
+	// writeRedirects allows redirects that preserve a write request method.
+	writeRedirects bool
+
 	// chunkSize enables chunked upload when positive.
 	chunkSize int64
 
@@ -55,6 +58,8 @@ type options struct {
 	plainHTTP bool
 	// retry bounds how failed requests are re-attempted.
 	retry RetryPolicy
+	// writeRedirects allows redirects that preserve a write request method.
+	writeRedirects bool
 	// chunkSize enables chunked upload when positive.
 	chunkSize int64
 	// pullWorkers enables parallel pull when positive.
@@ -80,6 +85,7 @@ func New(opts ...Option) *Client {
 		storageTransport: http.DefaultTransport,
 		plainHTTP:        false,
 		retry:            DefaultRetryPolicy(),
+		writeRedirects:   true,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -104,13 +110,14 @@ func New(opts ...Option) *Client {
 				registry: registryTransport,
 				storage:  storageTransport,
 			},
-			CheckRedirect: checkRedirect,
+			CheckRedirect: redirectPolicy(o.writeRedirects),
 		},
-		plainHTTP:   o.plainHTTP,
-		retry:       o.retry,
-		chunkSize:   o.chunkSize,
-		pullWorkers: o.pullWorkers,
-		pullChunk:   o.pullChunk,
+		plainHTTP:      o.plainHTTP,
+		retry:          o.retry,
+		writeRedirects: o.writeRedirects,
+		chunkSize:      o.chunkSize,
+		pullWorkers:    o.pullWorkers,
+		pullChunk:      o.pullChunk,
 	}
 	if c.pullWorkers > 0 {
 		c.bufPool = make(chan []byte, c.pullWorkers)
@@ -208,6 +215,16 @@ func WithStorageTransport(rt http.RoundTripper) Option {
 			o.storageTransport = rt
 			o.storageTransportConfigured = true
 		}
+	}
+}
+
+// WithWriteRedirects controls whether redirects may reissue POST, PUT, PATCH,
+// or DELETE requests. The default permits method-preserving write redirects.
+// Disable them when an embedding application accepts only upload-session
+// Locations returned by successful registry responses.
+func WithWriteRedirects(allow bool) Option {
+	return func(o *options) {
+		o.writeRedirects = allow
 	}
 }
 

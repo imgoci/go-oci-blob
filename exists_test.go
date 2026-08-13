@@ -111,7 +111,7 @@ func TestClientExists(t *testing.T) {
 			wantExists: true,
 		},
 		{
-			name: "surfaces registry detail on a server error",
+			name: "renders only status on a server error",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(headRequestFor(blobEndpoint)).
@@ -119,7 +119,7 @@ func TestClientExists(t *testing.T) {
 						`{"errors":[{"code":"UNKNOWN","message":"boom"}]}`), nil)
 			},
 			wantErr:         true,
-			wantErrContains: "boom",
+			wantErrContains: "500 Internal Server Error",
 		},
 		{
 			name: "surfaces a transport failure",
