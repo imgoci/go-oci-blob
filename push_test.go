@@ -142,7 +142,9 @@ func TestClientPush(t *testing.T) {
 
 		err := tc.client.Push(t.Context(), repo, dgst, int64(len(content)), strings.NewReader(content))
 
-		require.ErrorContains(t, err, "boom")
+		require.ErrorContains(t, err, "500 Internal Server Error")
+		assert.NotContains(t, err.Error(), "UNKNOWN")
+		assert.NotContains(t, err.Error(), "boom")
 	})
 
 	t.Run("surfaces a failed commit", func(t *testing.T) {

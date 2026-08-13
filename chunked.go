@@ -77,6 +77,15 @@ func (c *Client) patchChunk(
 	if err != nil {
 		return patchRequestError(err, initialBody, replay, offset, end)
 	}
+	if !c.writeRedirects && replayRedirect(resp.StatusCode) {
+		drainAndClose(resp.Body)
+		body := currentUploadBody(initialBody, replay)
+		body.waitReleased()
+		if sourceErr := body.sourceErrorIfReleased(); sourceErr != nil {
+			return false, fmt.Errorf("uploading chunk %d-%d: %w", offset, end, sourceErr)
+		}
+		return false, fmt.Errorf("uploading chunk %d-%d: %w", offset, end, errWriteRedirectRejected)
+	}
 	if replay == nil && replayRedirect(resp.StatusCode) {
 		_, locationErr := resolveLocation(
 			responseRequestURL(resp, session.url), resp.Header.Get("Location"))
@@ -178,7 +187,7 @@ func patchRequestError(
 	offset, end int64,
 ) (bool, error) {
 	body := currentUploadBody(initialBody, replay)
-	body.waitReleased()
+	body.closeAndWait()
 	if sourceErr := body.sourceErrorIfReleased(); sourceErr != nil {
 		return false, fmt.Errorf("uploading chunk %d-%d: %w", offset, end, sourceErr)
 	}

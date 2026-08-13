@@ -57,7 +57,7 @@ func TestClientMount(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "surfaces registry errors",
+			name: "renders only status for registry errors",
 			setupMocks: func(tc *testContext) {
 				tc.transport.EXPECT().
 					RoundTrip(postRequestFor(mountEndpoint)).
@@ -65,7 +65,7 @@ func TestClientMount(t *testing.T) {
 						`{"errors":[{"code":"UNKNOWN","message":"boom"}]}`), nil)
 			},
 			wantError:     true,
-			wantErrDetail: "boom",
+			wantErrDetail: "500 Internal Server Error",
 		},
 	}
 

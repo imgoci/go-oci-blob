@@ -230,6 +230,17 @@ func (c *Client) commitUpload(
 	if err != nil {
 		return commitRequestError(err, initialBody, replay)
 	}
+	if !c.writeRedirects && replayRedirect(resp.StatusCode) {
+		drainAndClose(resp.Body)
+		body := currentUploadBody(initialBody, replay)
+		if body != nil {
+			body.waitReleased()
+			if sourceErr := body.sourceErrorIfReleased(); sourceErr != nil {
+				return false, fmt.Errorf("committing upload: %w", sourceErr)
+			}
+		}
+		return false, fmt.Errorf("committing upload: %w", errWriteRedirectRejected)
+	}
 	if size > 0 && replay == nil && replayRedirect(resp.StatusCode) {
 		_, locationErr := resolveLocation(
 			responseRequestURL(resp, uploadURL), resp.Header.Get("Location"))
@@ -295,7 +306,7 @@ func commitRequestError(
 ) (bool, error) {
 	body := currentUploadBody(initialBody, replay)
 	if body != nil {
-		body.waitReleased()
+		body.closeAndWait()
 		if sourceErr := body.sourceErrorIfReleased(); sourceErr != nil {
 			return false, fmt.Errorf("committing upload: %w", sourceErr)
 		}

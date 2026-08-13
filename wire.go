@@ -1,7 +1,6 @@
 package blob
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +22,9 @@ import (
 // when interpreting a failed response.
 const maxErrorBodySize = 64 << 10
 
+// errInvalidLocation reports a structurally unusable peer-selected Location.
+var errInvalidLocation = errors.New("invalid registry Location")
+
 // blobURL builds the registry endpoint URL for a blob:
 // <scheme>://<host>/v2/<name>/blobs/<digest>.
 func blobURL(scheme string, repo Repository, dgst digest.Digest) *url.URL {
@@ -33,78 +35,49 @@ func blobURL(scheme string, repo Repository, dgst digest.Digest) *url.URL {
 	}
 }
 
-// resolveLocation resolves a Location header value against the URL of
-// the request that produced it. Registries return both relative and
-// absolute forms; both are accepted.
+// resolveLocation resolves a safe Location against base. Registries return
+// both relative and absolute forms; both are accepted.
 func resolveLocation(base *url.URL, location string) (*url.URL, error) {
 	if location == "" {
-		return nil, errors.New("registry response carried no Location header")
+		return nil, fmt.Errorf("%w: response carried no Location header", errInvalidLocation)
+	}
+	if base == nil {
+		return nil, fmt.Errorf("%w: response request URL is unavailable", errInvalidLocation)
 	}
 	ref, err := url.Parse(location)
 	if err != nil {
-		return nil, fmt.Errorf("registry returned unparseable Location %q: %w", location, err)
+		return nil, fmt.Errorf("%w: Location is malformed", errInvalidLocation)
+	}
+	if ref.User != nil {
+		return nil, fmt.Errorf("%w: Location contains user information", errInvalidLocation)
 	}
 	resolved := base.ResolveReference(ref)
 	resolved.Scheme = strings.ToLower(resolved.Scheme)
 	if resolved.Scheme != registrySchemeHTTP && resolved.Scheme != registrySchemeHTTPS {
-		return nil, fmt.Errorf("registry returned Location %q with unsupported scheme %q",
-			location, resolved.Scheme)
+		return nil, fmt.Errorf("%w: Location uses an unsupported scheme", errInvalidLocation)
+	}
+	if strings.EqualFold(base.Scheme, registrySchemeHTTPS) && resolved.Scheme == registrySchemeHTTP {
+		return nil, fmt.Errorf("%w: Location downgrades HTTPS to HTTP", errInvalidLocation)
 	}
 	if resolved.Hostname() == "" {
-		return nil, fmt.Errorf("registry returned Location %q without a host", location)
+		return nil, fmt.Errorf("%w: Location has no host", errInvalidLocation)
 	}
+	resolved.Fragment = ""
 	return resolved, nil
 }
 
-// interpretError turns a non-success registry response into an error.
-// It parses the OCI error body when one is present and falls back to
-// the status code alone when it is not. The response body is left for
-// the caller to close.
+// interpretError turns a non-success response into a structurally rendered
+// error. The bounded response detail is discarded because it is untrusted
+// peer-selected text. The response body is left for the caller to close.
 func interpretError(resp *http.Response) error {
-	var message string
 	if resp.Body != nil {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
-		if err == nil {
-			message = parseErrorBody(body)
-		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBodySize))
 	}
 	return &registryError{
 		status:     resp.StatusCode,
-		message:    message,
 		retryAfter: retryAfterDelay(resp.Header.Get("Retry-After"), time.Now()),
 		origin:     originOfResponse(resp),
 	}
-}
-
-// parseErrorBody extracts a printable message from an OCI error body
-// ({"errors": [{"code": ..., "message": ...}]}). A body that is not
-// that shape yields the empty string: a malformed error body is never
-// itself an error.
-func parseErrorBody(body []byte) string {
-	var parsed struct {
-		// Errors is the OCI error envelope's list of error details.
-		Errors []struct {
-			// Code is the machine-readable OCI error code.
-			Code string `json:"code"`
-			// Message is the human-readable explanation.
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-	parts := make([]string, 0, len(parsed.Errors))
-	for _, e := range parsed.Errors {
-		switch {
-		case e.Code != "" && e.Message != "":
-			parts = append(parts, e.Code+": "+e.Message)
-		case e.Code != "":
-			parts = append(parts, e.Code)
-		case e.Message != "":
-			parts = append(parts, e.Message)
-		}
-	}
-	return strings.Join(parts, "; ")
 }
 
 // contentRange is a validated byte interval reported by a
@@ -186,9 +159,6 @@ func parseDecimal(text string) (int64, error) {
 type registryError struct {
 	// status is the HTTP status code of the failed response.
 	status int
-	// message is the detail parsed from the OCI error body, or empty
-	// when the body was absent or not the OCI error shape.
-	message string
 	// retryAfter is the wait the peer asked for via Retry-After,
 	// or zero when it asked for none.
 	retryAfter time.Duration
@@ -196,11 +166,8 @@ type registryError struct {
 	origin responseOrigin
 }
 
-// Error renders the status and any parsed registry detail.
+// Error renders only the response status, never peer-selected body detail.
 func (e *registryError) Error() string {
-	if e.message != "" {
-		return fmt.Sprintf("registry returned %d: %s", e.status, e.message)
-	}
 	return fmt.Sprintf("registry returned %d %s", e.status, http.StatusText(e.status))
 }
 

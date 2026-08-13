@@ -334,7 +334,7 @@ func TestClientPushReportsUnusableAcceptedSessionLocation(t *testing.T) {
 		location string
 		wantErr  string
 	}{
-		{name: "reports a malformed Location", location: "%", wantErr: "unparseable Location"},
+		{name: "reports a malformed Location", location: "%", wantErr: "Location is malformed"},
 		{name: "reports a missing Location", wantErr: "no Location header"},
 	}
 
