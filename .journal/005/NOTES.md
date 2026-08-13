@@ -221,3 +221,13 @@ The final request-body-aware wire observer snapshot passed the full disposable T
 Cleanup proof: mode-0600, actual credential and Basic-auth sentinel, read-only export, named-container removal, and temporary-directory audits passed. No compatibility container, `/tmp` campaign folder, generated binary, credential, fixture, or raw evidence remains in the active filesystem.
 
 Next: Commit and publish the feature branch and open its GitHub PR. Keep session 005 open unless explicitly asked to close it.
+
+## 2026-08-12 19:21 — Exact committed archive proven and PR green
+
+Published implementation commit `c369be36fe3ceca20bb7fcfdd9194edd54b0be72` (`test: add repeatable registry compatibility harness`) on `feat/registry-compat-harness`; opened PR #25: https://github.com/imgoci/go-oci-blob/pull/25. CI, Go and Actions CodeQL, and GitHub Pages all passed.
+
+The final live proof used only `git archive c369be36fe3ceca20bb7fcfdd9194edd54b0be72`, made read-only with no overlay. Both fresh reports and the aggregate asserted that exact SHA as the library and harness commit. Normal and race runs were valid, the race run was clean, and the aggregate produced 17 `PASS`, three `N/A`, zero `NO`, and zero `BLOCKED`. Final exact-archive evidence hashes: normal `70ed9e45f36ac5c8de86cf55c326c88e413d9f7ad8586ca4fa14899a756a80b9`; race `aa6fcb087857c909bbda6321ba5eacbd48581631421285442d6fb80910bfc33b`; aggregate `f88e6bc049d564d0f0a393864f71e77537b75d3bde976209fe56f55769fa79a2`.
+
+Final cleanup proof: exact archive, read-only and private-mode checks, actual password and Basic-auth sentinel scan, named-container removal, temporary-directory removal, clean feature worktree, and generated-binary audit all passed. No campaign resource remains.
+
+Next: PR #25 is ready for review. Do not merge or close session 005 without explicit user direction.
