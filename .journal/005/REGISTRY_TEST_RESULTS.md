@@ -11,28 +11,28 @@
 
 ## Compatibility matrix
 
-| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry | Harbor | GitLab native registry |
-|---|---|---|---|---|---|---|---|---|
-| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
-| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
-| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS | PASS |
-| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS | PASS |
-| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A | N/A |
-| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| Feature | Amazon ECR Private | GHCR | Docker Hub | GCR URL, Artifact Registry-backed | Quay.io | Azure Container Registry | Harbor | GitLab native registry | Nexus Repository OSS 3.76.0 |
+|---|---|---|---|---|---|---|---|---|---|
+| HTTPS and authentication | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Small blob, about 1 KiB | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `Exists`, present and missing | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Serial `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Progress reporting | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| `PullRange` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel `Pull` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Parallel range-ignored fallback | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| Interrupted `Pull` resume | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Unreferenced blob retrieval | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed | PASS, observed |
+| Monolithic `Push` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Empty blob `Push` and `Pull` | NO | NO | PASS | NO | NO | PASS | PASS | PASS | PASS |
+| Chunked `Push` | NO | PASS | PASS | NO | PASS | PASS | PASS | PASS | PASS |
+| Wrong-digest rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
+| Exact-size rejection | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
+| Cross-repository `Mount` | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | NO |
+| Shared-client concurrency | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Off-origin redirect credential scope | PASS | PASS | PASS | N/A | PASS | PASS | N/A | N/A | N/A |
+| Upload `Location` handling | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Retry after registry throttling | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 
 ## Amazon ECR Private
 
@@ -537,3 +537,69 @@ Cleanup deleted all 21 registry repositories through GitLab's API, polled both p
 | Final race GitLab matrix | `ec03840cdedfd94fcab4362bded11554e4b0e22df57ab1178a9dffa112a86c01` |
 | Disposable GitLab matrix harness | `01254b251ced7aa4ff77a5f1729fcc5efd882409937ed5ad523aefd0e3938e95` |
 | GitLab CE arm64 image | `sha256:87eb39b6a5aa34fc1b4554689cd3996c5311a926753c8e0871c1e8df43992e94` |
+
+## Sonatype Nexus Repository OSS
+
+### Run identity
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-12 |
+| Nexus | Repository OSS `3.76.0`, final pre-Community release line |
+| Registry host | `registry.nexus.localtest.me:5057` |
+| Management host | `nexus.localtest.me:9446` |
+| Deployment | Disposable Docker Compose with two hosted Docker repositories, filesystem storage, and a campaign-only TLS reverse proxy |
+| Platform | Native `linux/arm64` image on a `linux/arm64` Docker host |
+| Credential model | Disposable initial Nexus admin credential through the real Docker Bearer Token Realm |
+| Library commit | `8700a0989bb82ca272ca986e2dc8eae79536d1b5` |
+| Go | `go1.26.4 darwin/arm64` |
+| ORAS | `1.3.0+unreleased`, built with Go 1.25.4 |
+| Parallel configuration | 4 workers, 1 MiB chunks |
+| Chunked-upload configuration | 1 MiB |
+| Retry configuration | 4 attempts, 100 ms initial delay, 2 s maximum delay |
+| Operation timeout | 90 seconds; 12 minutes per campaign |
+| Source hosted repository | `blob-ft`, connector port 5000 |
+| Destination hosted repository | `blob-ft-dest`, connector port 5001 |
+
+### Results
+
+| Feature | Result | Observed result |
+|---|---|---|
+| HTTPS and authentication | PASS | The campaign CA verified TLS. Anonymous `/v2/` returned `401`, and tokens from Nexus's Docker Bearer Token Realm authenticated data-plane requests. |
+| Small blob, 1,027 bytes | PASS | Library Push succeeded and an independent authenticated GET returned all exact bytes. |
+| `Exists` | PASS | A present digest returned true through `HEAD 200`; a synthetic missing digest returned false through `HEAD 404`. |
+| Serial `Pull` | PASS | An ORAS-seeded 8,388,865-byte OCI layer reached verified EOF with exact bytes and an independent SHA-256 match. |
+| Progress reporting | PASS | Counts were monotonic, reached the known total, and did not overlap within one transfer. |
+| `PullRange` | PASS | Beginning, middle, and tail windows returned exact bytes through native `206`; a past-end request was rejected. |
+| Parallel `Pull` | PASS | Nine ranged `206` requests returned exact ordered bytes. All four configured response bodies overlapped in the final race run, and zero remained active. |
+| Parallel range-ignored fallback | N/A | Nexus served native ranges, so fallback was not used. |
+| Interrupted `Pull` resume | PASS | A consumer-injected body break after 1 MiB resumed through `206` and returned exact final bytes and digest. |
+| Unreferenced blob retrieval | PASS, observed | Before a manifest referenced it, library Pull, raw GET, and independent ORAS blob fetch returned the exact completed blob. |
+| Monolithic `Push` | PASS | The default path used `POST 202` and one body-bearing `PUT 201` with no PATCH; raw GET and ORAS verification passed. |
+| Empty blob | PASS | Nexus accepted the canonical zero-byte blob; raw GET and library Pull both returned exactly zero bytes. |
+| Chunked `Push` | PASS | An 8,389,341-byte upload used nine acknowledged `PATCH 202` requests and a final `PUT 201`; independent raw retrieval returned exact bytes. |
+| Wrong digest | NO | Nexus returned `PUT 400` and Push returned an error, but the claimed digest answered `HEAD 200` and served the uploaded bytes even though their SHA-256 differed. Verified library Pull returned `ErrDigestMismatch`; one cleanup DELETE was observed. |
+| Exact reader size | NO | Short and trailing readers both returned errors and attempted cleanup, but the timing-sensitive trailing case still committed the exact declared prefix in three of five fresh campaigns, including both race runs. |
+| Cross-repository `Mount` | NO | The destination in a distinct Nexus hosted repository was proven absent. Nexus returned `202`, the client returned `(false, nil)`, deleted the opened session, and the destination remained absent. |
+| Shared-client concurrency | PASS | Four Pushes, three Pulls, three PullRanges, two Exists checks, and two Mount declines shared one client. Four created artifacts passed independent exact-byte GETs, and the race detector reported no race. |
+| Redirect credential scope | N/A | Filesystem-backed Nexus emitted no off-origin storage redirect. |
+| Upload `Location` | PASS | Successful and safely rejected operations followed both relative and same-origin absolute opaque upload locations. |
+| Throttling retry | N/A | The bounded local campaigns produced no `429` response. |
+
+### Verification and cleanup
+
+Five fresh salted campaigns established the final conservative matrix: 14 PASS results including the observed unreferenced behavior, three NO, and three N/A. The final normal run completed in 0.77 seconds. The final race run completed in 1.02 seconds of test time with no race report. Wrong-digest corruption and Mount decline reproduced in all five campaigns. Trailing-size persistence reproduced in three of five and in both race campaigns; the short-reader digest always remained absent.
+
+The first startup used current Community Edition `3.93.1`, which blocked registry traffic until its separate EULA was accepted. No EULA was accepted and no test data was written. Sonatype states that binary distributions from `3.77` onward are Community Edition, so the campaign reset the volume and targeted the native-arm64 `3.76.0` image from the final OSS release line.
+
+Cleanup deleted both hosted repositories through the Nexus API and confirmed them absent, then removed the exact Compose containers, network, filesystem volume, Nexus and proxy images, TLS material, credential, immutable source export, fixtures, harness, logs, and evidence from the active filesystem. Ports 9446 and 5057 were closed. The unrelated pre-existing GitHub MCP container was not touched, and the main checkout remained clean.
+
+### Evidence identities
+
+| Evidence | SHA-256 |
+|---|---|
+| Final normal Nexus matrix | `ff8dbfd8a221a7d919526fbc3c6b904087ced70c7512a1f93998ac44b18fcf3c` |
+| Reproducing normal Nexus matrix | `d4628258bac483fdfd9e1941ec2431b346d35785c695ea42023602aa6df87091` |
+| Final race Nexus matrix | `e3cf6e2fd2a6e3928b8f0818cd87e884d4aeb2a6f88b8ea78ab803bc5dc09e01` |
+| Disposable Nexus harness bundle | `1c96c3fb1312a83dd5e90bf7238e7bfe11b57fc1dd3d690a193cb66610abea56` |
+| Nexus OSS arm64 image | `sha256:e0f60d554592725468184da3edd66e8f27b4c6ce31c8d8486eb683362801deae` |
